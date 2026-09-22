@@ -1,0 +1,52 @@
+{
+  "name": "gea-fiotp-gea",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "node patches/geastack-apple-macos-password.mjs",
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types tests/otp.test.ts && sh scripts/test-native.sh",
+    "dev": "gea dev",
+    "build": "gea build --target web",
+    "build:macos": "gea build --target macos && plutil -replace NSCameraUsageDescription -string 'FiOTP QR kodlarını taramak için kamerayı kullanır.' dist/macos/fiotp-gea/FiOTP.app/Contents/Info.plist && codesign --force --deep --sign - dist/macos/fiotp-gea/FiOTP.app"
+  },
+  "dependencies": {
+    "@geajs/core": "latest",
+    "@geastack/apple": "^0.2.8",
+    "@geastack/cli": "^0.1.78",
+    "@geastack/core": "^0.1.12",
+    "@geastack/targets": "^0.1.77"
+  },
+  "devDependencies": {
+    "typescript": "latest",
+    "vite": "latest"
+  },
+  "gea": {
+    "id": "fiotp-gea",
+    "bundleId": "com.fiskindal.fiotp",
+    "name": "FiOTP",
+    "description": "Secure TOTP & HOTP authenticator vault.",
+    "entry": "src/index.tsx",
+    "targets": {
+      "web": true,
+      "esp32": false,
+      "rp2350": false,
+      "geaos": false,
+      "macos": true,
+      "ios": false,
+      "android": false,
+      "windows": false
+    },
+    "nativeSources": [
+      "native/fiotp_host.mm"
+    ],
+    "compilerPlugins": [
+      "scripts/fiotp-host-plugin.mjs"
+    ],
+    "ota": {
+      "ble": true
+    }
+  },
+  "license": "MIT"
+}

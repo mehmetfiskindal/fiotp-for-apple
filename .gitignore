@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.gea/build/
+.env
+*.p12
+*.cer
+*.key
+*.mobileprovision
+*.provisionprofile
+*.dmg
+*.pkg
+*.zip
+*.json.bak
+kasa.json
+kasa.json.bak
+.notarytool/

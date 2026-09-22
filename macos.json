@@ -1,0 +1,13 @@
+{
+  "window": {
+    "width": 1100,
+    "height": 740,
+    "minWidth": 850,
+    "minHeight": 550,
+    "title": "FiOTP",
+    "fullSizeContentView": true,
+    "titleBarTransparent": true,
+    "titleVisibility": "hidden",
+    "appearance": "dark"
+  }
+}
