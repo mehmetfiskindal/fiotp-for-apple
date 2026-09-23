@@ -14,19 +14,45 @@ import {
 import type { Account } from './types'
 import { vaultService } from './services/VaultService'
 import { vaultStore } from './stores/VaultStore'
-import { MacHost } from './platform/macHost'
+import { platformHost } from './platform/host'
+import UnlockView from './components/UnlockView'
+import AccountList from './components/AccountList'
 import './styles.css'
 
 function safeCopy(text: string): void {
-  MacHost.copy(text)
+  platformHost.copy(text)
 }
 
 const AUTO_LOCK_MS = 5 * 60 * 1000 // 5 minutes inactivity
 
+function vaultLocationLabel(): string {
+  if (platformHost.platform === 'ios') {
+    if (!vaultStore.hasVault) return 'Bu iPhone’da henüz kasa yok'
+    const selectedPath = vaultStore.vaultPath
+    if (selectedPath.includes('/FiOTP/imported/')) {
+      const fileName = selectedPath.split('/').pop() || 'kasa.json'
+      return `Dosyalardan seçilen kasa · ${fileName}`
+    }
+    return 'Bu iPhone’da FiOTP uygulama alanı · kasa.json'
+  }
+  return vaultStore.vaultPath
+}
+
+function unlockErrorMessage(error: unknown): string {
+  const message = (error as Error).message
+  // iOS container paths are long, change between installs, and are not
+  // navigable in Files. Keep the actionable error without flooding the view.
+  if (platformHost.platform === 'ios') {
+    if (/couldn.t be opened|no such file|does not exist/i.test(message)) {
+      return 'Bu iPhone’daki varsayılan kasa bulunamadı. “Var Olan Kasayı Aç…” ile Dosyalar’dan şifreli kasa .json dosyanızı seçin.'
+    }
+    return message
+  }
+  return `${message} Aktif kasa: ${vaultStore.vaultPath}`
+}
+
 export class App extends ReactiveComponent {
-  unlockInput = ''
-  unlockConfirmInput = ''
-  unlockError = ''
+  passwordResetToken = 0
   creatingVault = false
   copiedId = ''
   // epochSeconds stores floor(Date.now()/1000).
@@ -79,6 +105,8 @@ export class App extends ReactiveComponent {
     this.initialized = true
     this.lastActivityTime = Date.now()
     this.epochSeconds = Math.floor(Date.now() / 1000)
+    // Start at the vault chooser. Creating a vault is an explicit action;
+    // don't put first-run users directly into the creation form.
     this.loadState()
     this.startRafLoop()
   }
@@ -119,12 +147,12 @@ export class App extends ReactiveComponent {
     vaultStore.accounts = []
   }
 
-  loadState() {
+  loadState(showCreateFormWhenEmpty = false) {
     try {
       vaultStore.loadStatus()
-      this.creatingVault = false
+      this.creatingVault = showCreateFormWhenEmpty && !vaultStore.hasVault
     } catch (e) {
-      this.unlockError = (e as Error).message
+      vaultStore.error = (e as Error).message
     }
   }
 
@@ -195,74 +223,98 @@ export class App extends ReactiveComponent {
 
   lockVault() {
     vaultStore.lock()
-    this.unlockInput = ''
-    this.unlockConfirmInput = ''
-    this.unlockError = ''
+    this.passwordResetToken++
+    vaultStore.error = ''
     this.creatingVault = false
   }
 
-  unlockVault() {
+  unlockVault(password: string): boolean {
     this.recordActivity()
     try {
       if (!vaultStore.hasVault || this.creatingVault) {
         throw new Error('Önce mevcut bir kasa seçin.')
       }
-      vaultStore.open(this.unlockInput, vaultStore.vaultPath)
-      this.unlockInput = ''
-      this.unlockError = ''
+      if (!password.length) {
+        throw new Error('Kasa parolasını girin.')
+      }
+      vaultStore.open(password, vaultStore.vaultPath)
+      vaultStore.error = ''
       this.showToast(vaultStore.totalCount ? 'Kasa kilidi açıldı' : 'Güvenli boş kasa hazır')
+      return true
     } catch (e) {
-      this.unlockError = `${(e as Error).message} Aktif kasa: ${vaultStore.vaultPath}`
+      vaultStore.error = `Kasa açılamadı: ${unlockErrorMessage(e)}`
+      return false
     }
   }
 
-  createVault() {
+  createVault(password: string, confirmation: string): boolean {
     this.recordActivity()
     try {
       if (!this.creatingVault) throw new Error('Önce yeni kasa konumunu seçin.')
-      if (this.unlockInput !== this.unlockConfirmInput) {
+      if (password !== confirmation) {
         throw new Error('Parolalar eşleşmiyor.')
       }
-      vaultStore.create(this.unlockInput, vaultStore.vaultPath)
+      vaultStore.create(password, vaultStore.vaultPath)
       this.creatingVault = false
-      this.unlockInput = ''
-      this.unlockConfirmInput = ''
-      this.unlockError = ''
+      vaultStore.error = ''
       this.showToast('Güvenli boş kasa oluşturuldu')
+      return true
     } catch (e) {
-      this.unlockError = `${(e as Error).message} Aktif kasa: ${vaultStore.vaultPath}`
+      const message = (e as Error).message
+      if (message.includes('vault_exists') || message.includes('Bu konumda zaten bir kasa')) {
+        // The selected destination may have appeared since the last status
+        // check. Recover into the existing-vault flow instead of trapping the
+        // user in a create form that can never succeed.
+        try {
+          const status = vaultStore.loadStatus()
+          this.creatingVault = false
+          this.passwordResetToken++
+          vaultStore.error = status.hasVault
+            ? 'Bu konumda zaten bir kasa var. Yeni parola oluşturmayın; mevcut kasa parolanızı girin.'
+            : unlockErrorMessage(e)
+        } catch {
+          vaultStore.error = unlockErrorMessage(e)
+        }
+      } else {
+        vaultStore.error = unlockErrorMessage(e)
+      }
+      return false
     }
   }
 
   chooseVault(openExisting: boolean) {
-    try {
-      const status = vaultService.chooseVault(openExisting)
+    vaultService.chooseVault(openExisting, (status) => {
       vaultStore.select(status)
-      this.creatingVault = !openExisting
-      this.unlockInput = ''
-      this.unlockConfirmInput = ''
-      this.unlockError = ''
-    } catch (e) {
-      if (!(e as Error).message.includes('iptal')) this.unlockError = (e as Error).message
-    }
+      this.creatingVault = !openExisting && !status.hasVault
+      this.passwordResetToken++
+      vaultStore.error = ''
+      if (openExisting && !status.hasVault) {
+        vaultStore.error = 'Seçilen dosya kasa olarak bulunamadı. Şifreli FiOTP .json kasa dosyasını seçin.'
+      } else if (!openExisting && status.hasVault) {
+        vaultStore.error = 'Bu konumda zaten bir kasa var. Yeni parola oluşturmayın; mevcut kasa parolanızı girin.'
+      }
+    }, (e) => {
+      if (!(e as Error).message.includes('iptal')) vaultStore.error = (e as Error).message
+    })
   }
 
   scanQr() {
-    try {
-      const envelope = JSON.parse(MacHost.invoke('qr.scanCamera')) as {
-        ok: boolean
-        data: { value: string }
+    platformHost.invokeAsync('qr.scanCamera', {}, (raw) => {
+      try {
+        const envelope = JSON.parse(raw) as { ok: boolean; data: { value: string } }
+        this.uriInput = envelope.data.value
+        this.addTab = 'uri'
+        this.addError = ''
+        // Camera scanning is an import action, not merely a URI capture step.
+        // Persist the decoded account(s) immediately so users do not have to
+        // discover and press a second button after the scanner closes.
+        this.saveNewAccount()
+      } catch (e) {
+        this.addError = (e as Error).message
       }
-      this.uriInput = envelope.data.value
-      this.addTab = 'uri'
-      this.addError = ''
-      // Camera scanning is an import action, not merely a URI capture step.
-      // Persist the decoded account(s) immediately so users do not have to
-      // discover and press a second button after the scanner closes.
-      this.saveNewAccount()
-    } catch (e) {
+    }, (e) => {
       if (!(e as Error).message.includes('iptal')) this.addError = (e as Error).message
-    }
+    })
   }
 
   openVerify(id: string) {
@@ -491,25 +543,23 @@ export class App extends ReactiveComponent {
     this.settingsError = ''
     this.settingsMessage = ''
 
-    try {
-      const count = vaultService.importBackup(this.importJsonInput, mode)
+    vaultService.importBackup(this.importJsonInput, mode, (count) => {
       this.refreshAccounts()
       this.importJsonInput = ''
       this.settingsMessage = `${count} hesap şifreli yedekten içe aktarıldı.`
-    } catch (e) {
+    }, (e) => {
       this.settingsError = `İçe aktarma hatası: ${(e as Error).message}`
-    }
+    })
   }
 
   exportBackup() {
     this.recordActivity()
     this.settingsError = ''
-    try {
-      const path = vaultService.exportBackup()
+    vaultService.exportBackup((path) => {
       this.settingsMessage = `Şifreli yedek kaydedildi: ${path}`
-    } catch (e) {
+    }, (e) => {
       if (!(e as Error).message.includes('iptal')) this.settingsError = (e as Error).message
-    }
+    })
   }
 
   template() {
@@ -519,110 +569,26 @@ export class App extends ReactiveComponent {
 
     return (
       <div class="app-switch-root" data-account-count={vaultStore.totalCount}>
-        <div class="app-stage" style={{ display: vaultStore.unlocked ? 'none' : 'flex' }}>
-        <div class="unlock-wrapper">
-          <div class="unlock-box">
-            <div class="unlock-badge">🛡️</div>
-            <div class="unlock-heading">FiOTP</div>
-            <div class="unlock-sub">Yerel, şifreli 2FA kasası</div>
-
-            <div class="vault-row-card">
-              <div class="vault-info-col">
-                <span class="vault-info-label">Aktif Kasa</span>
-                <span class="vault-info-path">{vaultStore.vaultPath}</span>
-              </div>
-              <button
-                class="btn-change-vault"
-                onClick={() => this.chooseVault(true)}
-              >
-                Değiştir...
-              </button>
-            </div>
-
-            {this.unlockError ? (
-              <div class="alert-error" style={{ width: '100%' }}>
-                {this.unlockError}
-              </div>
-            ) : null}
-
-            {this.creatingVault ? (
-              <div class="create-vault-panel">
-                <div class="create-vault-title">Yeni kasa oluştur</div>
-                <input
-                  class="password-input create-password-input"
-                  type="password"
-                  placeholder="Yeni master parola (en az 8 karakter)"
-                  value={this.unlockInput}
-                  onInput={(e: InputEvent) => { this.unlockInput = e.target.value }}
-                />
-                <input
-                  class="password-input create-password-input"
-                  type="password"
-                  placeholder="Master parolayı doğrula"
-                  value={this.unlockConfirmInput}
-                  onInput={(e: InputEvent) => { this.unlockConfirmInput = e.target.value }}
-                  onKeyDown={(e: KeyEvent) => {
-                    if (e.keyCode === 13) this.createVault()
-                  }}
-                />
-                <div class="create-vault-actions">
-                  <button class="btn-secondary-half" onClick={() => {
-                    this.creatingVault = false
-                    this.unlockInput = ''
-                    this.unlockConfirmInput = ''
-                    this.loadState()
-                  }}>Vazgeç</button>
-                  <button class="btn-create-submit" onClick={() => this.createVault()}>
-                    Yeni Kasayı Oluştur →
-                  </button>
-                </div>
-              </div>
-            ) : vaultStore.hasVault ? (
-              <div class="input-submit-wrap">
-                <input
-                  class="password-input"
-                  type="password"
-                  placeholder="Master Parola"
-                  value={this.unlockInput}
-                  onInput={(e: InputEvent) => { this.unlockInput = e.target.value }}
-                  onKeyDown={(e: KeyEvent) => {
-                    if (e.keyCode === 13) this.unlockVault()
-                  }}
-                />
-                <button class="btn-open-submit" onClick={() => this.unlockVault()}>
-                  Kasayı Aç →
-                </button>
-              </div>
-            ) : (
-              <div class="empty-vault-notice">
-                Bu konumda kasa yok. Mevcut bir kasa seçin veya yeni kasa oluşturun.
-              </div>
-            )}
-
-            <div class="unlock-hint">● 5 dk hareketsizlikte oto-kilit</div>
-
-            <div class="unlock-actions-row">
-              <button
-                class="btn-secondary-half"
-                onClick={() => this.chooseVault(true)}
-              >
-                Var Olan Kasayı Aç…
-              </button>
-              <button
-                class="btn-secondary-half"
-                onClick={() => this.chooseVault(false)}
-              >
-                Yeni Konumda Kasa Oluştur…
-              </button>
-            </div>
-          </div>
-
-          <div class="unlock-footer-text">
-            FiOTP v0.1.0 • Offline • AES-256-GCM Encrypted
-          </div>
-          </div>
+        <div class="app-stage" style={{ display: vaultStore.phase === 'unlocked' ? 'none' : 'flex' }}>
+          <UnlockView
+            hasVault={vaultStore.hasVault}
+            vaultLocation={vaultLocationLabel()}
+            error={vaultStore.error}
+            isIOS={platformHost.platform === 'ios'}
+            creatingVault={this.creatingVault}
+            resetToken={this.passwordResetToken}
+            busy={vaultStore.phase === 'opening'}
+            onUnlock={(password: string) => this.unlockVault(password)}
+            onCreate={(password: string, confirmation: string) => this.createVault(password, confirmation)}
+            onSelectVault={() => this.chooseVault(true)}
+            onCreateVault={() => this.chooseVault(false)}
+            onCancelCreate={() => {
+              this.creatingVault = false
+              this.passwordResetToken++
+            }}
+          />
         </div>
-        <div class="app-stage" style={{ display: vaultStore.unlocked ? 'flex' : 'none' }}>
+        <div class="app-stage" style={{ display: vaultStore.phase === 'unlocked' ? 'flex' : 'none' }}>
       <div class="root-layout" onClick={() => this.recordActivity()}>
         {/* TitleBar (36px, surfaceLowest) */}
         <div class="title-bar">
@@ -799,111 +765,17 @@ export class App extends ReactiveComponent {
             </div>
 
             {/* Cards List */}
-            <div
-              class="empty-box"
-              style={{ display: vaultStore.liveAccounts.length === 0 ? 'flex' : 'none' }}
-            >
-                <div class="empty-title">Henüz hesap yok</div>
-                <div class="empty-body">
-                  QR tarayarak, URI yapıştırarak veya manuel girerek hesap ekleyin.
-                </div>
-                <button
-                  class="btn-primary-add"
-                  style={{ marginTop: '12px' }}
-                  onClick={() => {
-                    this.showAddModal = true
-                  }}
-                >
-                  + Hesap Ekle
-                </button>
-            </div>
-            <div
-              class="cards-list"
-              style={{ display: vaultStore.liveAccounts.length === 0 ? 'none' : 'flex' }}
-            >
-                {vaultStore.liveAccounts.map((acc) => {
-                  const initials = (acc.issuer || '??').slice(0, 2).toUpperCase()
-                  return (
-                    <div class="totp-card" key={acc.id}>
-                      <div class="card-left">
-                        <div class="card-badge">{initials}</div>
-                        <div class="card-meta">
-                          <div class="card-title-row">
-                            <span class="issuer-text">{acc.issuer}</span>
-                            <button
-                              class={acc.favorite ? 'star-icon' : 'star-icon-off'}
-                              onClick={() => this.toggleFavorite(acc.id)}
-                            >
-                              ★
-                            </button>
-                            <span class="chip-meta">{acc.algorithm}</span>
-                            <span class="chip-meta">{acc.type === 'hotp' ? 'HOTP' : 'TOTP'}</span>
-                            {acc.tags.includes('is') ? <span class="chip-tag">İş</span> : null}
-                            {acc.tags.includes('kisisel') ? <span class="chip-tag">Kişisel</span> : null}
-                          </div>
-                          <div class="account-username">{acc.account}</div>
-                        </div>
-                      </div>
-                      <div class="card-right">
-                        {acc.type === 'totp' ? (
-                          <div class="timer-ring-wrap">
-                            <div class={`timer-ring-bg ${acc.remainingSeconds <= 5 ? 'danger' : acc.remainingSeconds <= 10 ? 'warning' : ''}`}>
-                              <div class="timer-ring-inner">
-                                {acc.remainingSeconds}
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <button class="btn-card-action" onClick={() => this.incrementHotp(acc.id)}>
-                            Sayaç {acc.counter ?? 0} +
-                          </button>
-                        )}
-
-                        <button
-                          class={`code-box ${this.copiedId === acc.id ? 'copied' : ''}`}
-                          onClick={() => this.copyCode(
-                            acc.type === 'hotp'
-                              ? generateHotp(base32Decode(acc.secret), acc.counter ?? 0, { digits: acc.digits, algorithm: acc.algorithm })
-                              : generateTotp(acc.secret, acc.period, acc.digits, acc.algorithm, Date.now()).code,
-                            acc.id
-                          )}
-                        >
-                          <span class={`code-text ${acc.type === 'totp' && acc.remainingSeconds <= 5 ? 'urgent' : ''}`}>
-                            {this.copiedId === acc.id
-                              ? 'Kopyalandı ✓'
-                              : acc.type === 'hotp'
-                                ? acc.liveCode
-                                : acc.liveCode}
-                          </span>
-                          <span class="copy-icon">⧉</span>
-                        </button>
-
-                        <button
-                          class="btn-card-action"
-                          onClick={() => this.openQr(acc.id)}
-                        >
-                          QR
-                        </button>
-
-                        {/* Verify Action */}
-                        <button
-                          class="btn-card-action"
-                          onClick={() => this.openVerify(acc.id)}
-                        >
-                          Doğrula
-                        </button>
-                        <button
-                          class="btn-card-action"
-                          style={{ color: '#ffb4ab' }}
-                          onClick={() => this.deleteAccount(acc.id)}
-                        >
-                          Sil
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
-            </div>
+            <AccountList
+              accounts={vaultStore.liveAccounts}
+              copiedId={this.copiedId}
+              onAddAccount={() => { this.showAddModal = true }}
+              onToggleFavorite={(id: string) => this.toggleFavorite(id)}
+              onIncrementHotp={(id: string) => this.incrementHotp(id)}
+              onCopy={(id: string, code: string) => this.copyCode(code, id)}
+              onShowQr={(id: string) => this.openQr(id)}
+              onVerify={(id: string) => this.openVerify(id)}
+              onDelete={(id: string) => this.deleteAccount(id)}
+            />
           </div>
         </div>
 

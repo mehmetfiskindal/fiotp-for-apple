@@ -1,0 +1,21 @@
+---
+description: FiOTP GeaStack projesinde güvenli, test edilebilir ve platform uyumlu geliştirme standartları.
+alwaysApply: true
+---
+
+# FiOTP GeaStack Geliştirme Kuralları
+
+- GeaStack/Gea uygulaması geliştiriyoruz; React veya React Native varsayımlarını Gea’ya taşımayın. JSX’te `class` ve Gea’nın desteklediği olay adlarını kullanın; hooks, `className` veya sanal DOM davranışına dayanmayın.
+- Paylaşılan ve kalıcı ekran durumu için `@geastack/core` `Store` sınıfını kullanın ve tekil store örneğini dışa aktarın. Yalnızca geçici, o bileşene ait durum component sınıfında kalsın.
+- Bir uygulamanın tüm arayüzünü tek bir component’e yığmayın. `App` kompozisyon ve ekran akışını yönetsin; toolbar, kasa açma ekranı, hesap listesi/kartı ve formlar gibi anlamlı sorumlulukları ayrı, yeniden kullanılabilir Gea component’lerine bölün. Component’leri odaklı ve okunabilir tutun.
+- Görünürlüğü etkileyen ekran geçişlerinde reaktif store alanlarını doğrudan şablonda okuyun; kritik geçişleri dolaylı getter veya ayrı senkronize edilen yerel bayraklara bağlamayın. Geniş kök ağaçları gereksiz yere söküp yeniden kurmayın.
+- Gea’nın derleme zamanı JSX dönüştürücüsünün desteklemediği spread/dinamik tag/fragment kalıplarından kaçının. UI değişikliklerinden sonra hedef Gea derlemesini çalıştırın.
+- OTP ve kasa mantığını `src/crypto` ve `src/services` içinde platformdan bağımsız tutun. Dosya sistemi, kriptografi, pano, kamera ve belge seçiciyi typed platform host adaptörlerinden geçirin; AppKit kodunu iOS’a sızdırmayın.
+- TOTP/HOTP davranışını RFC uyumlu tutun; algoritma, sayaç, süre ve şifreli kasa şeması değişikliklerine test ve açık migrasyon ekleyin. Formatı sessizce veya geriye uyumsuz biçimde değiştirmeyin.
+- Üretim arayüzünde mock/test hesap göstermeyin; fixture verisini yalnız testlerde kullanın. Parolaları, OTP sırlarını ve çözülmüş kasa içeriğini loglamayın, düz metin depolamayın veya Keychain’e yazmayın.
+- Kasa/backup işlemlerinde mevcut kullanıcı dosyalarını koruyun; üzerine yazma, silme veya format değiştirme öncesi mevcut davranışı ve yedeklemeyi doğrulayın. Hataları kullanıcıya anlaşılır, eyleme dönük biçimde gösterin.
+- iOS sandbox’ı ve macOS dosya yolları farklıdır. Dosya seçici sonucunu, erişim iznini, seçili yolu ve kasa durumunu tek bir servis/store akışında güncelleyin; iptal, eksik dosya, bozuk dosya ve yanlış parola durumlarını ayrı ele alın.
+- TypeScript’te açık türleri tercih edin; `any`, sessiz `catch`, sahte başarı bildirimi ve doğrulanmamış dosya/hesap sayılarını kullanmayın. Asenkron native işlemlerde başarı ve hata callback’lerini tamamlayın.
+- `node_modules` içinde elle yapılan değişiklikler kalıcı değildir. Gerekli bağımlılık düzeltmesini `patches/` altında tekrarlanabilir yama ve `postinstall` bağlantısıyla saklayın; üretilmiş `dist/` çıktılarını kaynak değişikliği yerine kullanmayın.
+- Değişiklik kapsamına göre `npm run check`, `npm test`, `npx gea inspect --json` ve ilgili macOS/iOS derlemesini çalıştırın. Native kaynak, manifest veya compiler plugin değiştiyse hedef derlemesini atlamayın.
+- UI’ı iPhone ve macOS’ta kullanılabilir tutun: mobil güvenli alanları, klavye açılmasını, kaydırmayı, metin taşmasını ve parola alanlarının gizliliğini kontrol edin. Mevcut tasarım dilini koruyun; gerçek izin/hata/boş durumlarını açıkça gösterin.

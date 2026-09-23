@@ -1,4 +1,10 @@
+#import <TargetConditionals.h>
+#if TARGET_OS_OSX
 #import <AppKit/AppKit.h>
+#else
+#import <UIKit/UIKit.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#endif
 #import <AVFoundation/AVFoundation.h>
 #import <Vision/Vision.h>
 #import <CommonCrypto/CommonCryptor.h>
@@ -12,6 +18,7 @@
 #include <dlfcn.h>
 #include "fiotp_host.h"
 
+#if TARGET_OS_OSX
 @interface FiOTPQRScanner : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
 @property(nonatomic, strong) AVCaptureSession *session;
 @property(nonatomic, strong) NSPanel *panel;
@@ -20,7 +27,131 @@
 - (NSString *)scan:(NSError **)error;
 - (void)cancel:(id)sender;
 @end
+#endif
 
+#if TARGET_OS_IOS
+typedef void (^FiOTPUICompletion)(BOOL ok, id data, NSString *message, NSString *code);
+
+@interface FiOTPDocumentPicker : NSObject <UIDocumentPickerDelegate>
+@property(nonatomic, copy) FiOTPUICompletion completion;
+@property(nonatomic, assign) BOOL exporting;
+- (void)startOpeningBackup:(BOOL)backup;
+- (void)startExporting:(NSString *)path;
+@end
+
+@interface FiOTPQRScanner : UIViewController <AVCaptureMetadataOutputObjectsDelegate>
+@property(nonatomic, copy) FiOTPUICompletion completion;
+@property(nonatomic, strong) AVCaptureSession *session;
+@property(nonatomic, strong) AVCaptureVideoPreviewLayer *preview;
+@property(nonatomic, assign) BOOL finished;
+- (void)start;
+@end
+
+UIViewController *fiotpPresentingController(void) {
+  UIWindow *window = nil;
+  for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+    if (![scene isKindOfClass:UIWindowScene.class] || scene.activationState != UISceneActivationStateForegroundActive) continue;
+    for (UIWindow *candidate in ((UIWindowScene *)scene).windows) if (candidate.isKeyWindow) { window = candidate; break; }
+    if (window) break;
+  }
+  UIViewController *controller = window.rootViewController;
+  while (controller.presentedViewController && !controller.presentedViewController.isBeingDismissed) controller = controller.presentedViewController;
+  return controller;
+}
+
+@implementation FiOTPDocumentPicker
+- (void)startOpeningBackup:(BOOL)backup {
+  // Some Files providers label encrypted FiOTP exports as generic data rather
+  // than JSON. Allow both; vault.open validates the selected file contents.
+  UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON, UTTypeData] asCopy:YES];
+  picker.delegate = self;
+  picker.allowsMultipleSelection = NO;
+  picker.title = backup ? @"Yedek Kasayı İçe Aktar" : @"FiOTP Kasası Aç";
+  [fiotpPresentingController() presentViewController:picker animated:YES completion:nil];
+}
+- (void)startExporting:(NSString *)path {
+  self.exporting = YES;
+  NSURL *url = [NSURL fileURLWithPath:path];
+  UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForExportingURLs:@[url] asCopy:YES];
+  picker.delegate = self;
+  picker.title = @"FiOTP Şifreli Yedeğini Kaydet";
+  [fiotpPresentingController() presentViewController:picker animated:YES completion:nil];
+}
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+  NSURL *url = urls.firstObject;
+  if (!url) { self.completion(NO, nil, @"Dosya seçilmedi.", @"cancelled"); return; }
+  if (self.exporting) {
+    self.completion(YES, @{ @"path": url.path, @"exported": @YES }, nil, nil);
+    return;
+  }
+  BOOL opened = [url startAccessingSecurityScopedResource];
+  NSString *support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+  NSString *incoming = [support stringByAppendingPathComponent:@"FiOTP/imported"];
+  [NSFileManager.defaultManager createDirectoryAtPath:incoming withIntermediateDirectories:YES attributes:nil error:nil];
+  NSString *destination = [incoming stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@.json", NSUUID.UUID.UUIDString, url.lastPathComponent]];
+  NSURL *destinationURL = [NSURL fileURLWithPath:destination];
+  __block NSError *copyError = nil;
+  __block BOOL copied = NO;
+  NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+  [coordinator coordinateReadingItemAtURL:url options:0 error:&copyError byAccessor:^(NSURL *coordinatedURL) {
+    copied = [NSFileManager.defaultManager copyItemAtURL:coordinatedURL toURL:destinationURL error:&copyError];
+  }];
+  if (opened) [url stopAccessingSecurityScopedResource];
+  if (!copied) { self.completion(NO, nil, copyError.localizedDescription ?: @"Dosya uygulama kasasına alınamadı.", @"file_read_failed"); return; }
+  self.completion(YES, @{ @"path": destination, @"exported": @NO }, nil, nil);
+}
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
+  self.completion(NO, nil, @"İşlem iptal edildi.", @"cancelled");
+}
+@end
+
+@implementation FiOTPQRScanner
+- (void)start {
+  self.modalPresentationStyle = UIModalPresentationFullScreen;
+  self.view.backgroundColor = UIColor.blackColor;
+  UIButton *cancel = [UIButton buttonWithType:UIButtonTypeSystem];
+  [cancel setTitle:@"İptal" forState:UIControlStateNormal];
+  cancel.tintColor = UIColor.whiteColor;
+  cancel.frame = CGRectMake(20, 56, 88, 44);
+  [cancel addTarget:self action:@selector(cancelScan) forControlEvents:UIControlEventTouchUpInside];
+  [self.view addSubview:cancel];
+
+  AVCaptureDevice *camera = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+  NSError *error = nil;
+  AVCaptureDeviceInput *input = camera ? [AVCaptureDeviceInput deviceInputWithDevice:camera error:&error] : nil;
+  AVCaptureMetadataOutput *output = [AVCaptureMetadataOutput new];
+  self.session = [AVCaptureSession new];
+  if (!input || ![self.session canAddInput:input] || ![self.session canAddOutput:output]) {
+    [self finish:NO data:nil message:error.localizedDescription ?: @"Kamera başlatılamadı." code:@"camera_unavailable"];
+    return;
+  }
+  [self.session addInput:input]; [self.session addOutput:output];
+  [output setMetadataObjectsDelegate:self queue:dispatch_get_main_queue()];
+  output.metadataObjectTypes = @[AVMetadataObjectTypeQRCode];
+  self.preview = [AVCaptureVideoPreviewLayer layerWithSession:self.session];
+  self.preview.videoGravity = AVLayerVideoGravityResizeAspectFill;
+  [self.view.layer insertSublayer:self.preview atIndex:0];
+  [self.session startRunning];
+}
+- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; self.preview.frame = self.view.bounds; }
+- (void)metadataOutput:(AVCaptureMetadataOutput *)output didOutputMetadataObjects:(NSArray<AVMetadataObject *> *)objects fromConnection:(AVCaptureConnection *)connection {
+  for (AVMetadataObject *object in objects) {
+    if (![object isKindOfClass:AVMetadataMachineReadableCodeObject.class]) continue;
+    NSString *value = ((AVMetadataMachineReadableCodeObject *)object).stringValue;
+    if (value.length) { [self finish:YES data:@{ @"value": value } message:nil code:nil]; break; }
+  }
+}
+- (void)cancelScan { [self finish:NO data:nil message:@"QR tarama iptal edildi." code:@"cancelled"]; }
+- (void)finish:(BOOL)ok data:(id)data message:(NSString *)message code:(NSString *)code {
+  if (self.finished) return;
+  self.finished = YES;
+  [self.session stopRunning];
+  [self dismissViewControllerAnimated:YES completion:^{ self.completion(ok, data, message, code); }];
+}
+@end
+#endif
+
+#if TARGET_OS_OSX
 @implementation FiOTPQRScanner
 - (void)cancel:(id)sender { [NSApp abortModal]; }
 - (void)captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection {
@@ -110,6 +241,7 @@
   return self.result;
 }
 @end
+#endif
 
 namespace {
 constexpr uint32_t kIterations = 600000;
@@ -144,11 +276,53 @@ std::string response(BOOL ok, id data, NSString *message = nil, NSString *code =
 std::string failure(NSString *message, NSString *code = @"native_error") {
   return response(NO, nil, message ?: @"Bilinmeyen native hata", code);
 }
-NSString *expandedPath(NSString *path) {
-  if (!path.length || [path hasPrefix:@"~/Library/Application Support/FiOTP Gea/"]) {
+NSString *defaultVaultPath(void) {
+#if TARGET_OS_IOS
+  NSString *support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+  return [support stringByAppendingPathComponent:@"FiOTP/kasa.json"];
+#else
     NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/FiOTP Gea"];
     return [dir stringByAppendingPathComponent:@"kasa.json"];
+#endif
+}
+NSString *discoverIosVaultPath(NSString *preferredPath) {
+#if TARGET_OS_IOS
+  NSFileManager *fm = NSFileManager.defaultManager;
+  NSString *preferred = preferredPath.length ? preferredPath.stringByStandardizingPath : nil;
+  if (preferred && [fm fileExistsAtPath:preferred]) return preferred;
+
+  NSString *defaultPath = defaultVaultPath();
+  if ([fm fileExistsAtPath:defaultPath]) return defaultPath;
+
+  // A Files-picked vault is copied into Application Support so it remains
+  // available after the document picker closes. If the app container path
+  // changed after reinstall/update, recover that imported file instead of
+  // incorrectly reporting that this iPhone has no vault.
+  NSString *support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+  NSString *incoming = [support stringByAppendingPathComponent:@"FiOTP/imported"];
+  NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:incoming error:nil];
+  NSString *latestPath = nil;
+  NSDate *latestDate = nil;
+  for (NSString *name in names) {
+    if (![name.pathExtension.lowercaseString isEqualToString:@"json"]) continue;
+    NSString *candidate = [incoming stringByAppendingPathComponent:name];
+    NSDictionary *attributes = [fm attributesOfItemAtPath:candidate error:nil];
+    NSDate *modified = attributes[NSFileModificationDate];
+    if (!latestPath || [modified compare:latestDate ?: [NSDate distantPast]] == NSOrderedDescending) {
+      latestPath = candidate;
+      latestDate = modified;
+    }
   }
+  return latestPath ?: defaultPath;
+#else
+  return preferredPath.length ? preferredPath : defaultVaultPath();
+#endif
+}
+NSString *expandedPath(NSString *path) {
+  if (!path.length) return defaultVaultPath();
+#if TARGET_OS_OSX
+  if ([path hasPrefix:@"~/Library/Application Support/FiOTP Gea/"]) return defaultVaultPath();
+#endif
   return path.stringByExpandingTildeInPath.stringByStandardizingPath;
 }
 NSData *randomData(NSUInteger length) {
@@ -261,6 +435,12 @@ BOOL writeEnvelope(NSDictionary *envelope, NSString *path, BOOL backup, NSError 
   [fm removeItemAtPath:path error:nil];
   if (![fm moveItemAtPath:temp toPath:path error:error]) { [fm removeItemAtPath:temp error:nil]; return NO; }
   chmod(path.fileSystemRepresentation, S_IRUSR | S_IWUSR);
+#if TARGET_OS_IOS
+  NSURL *savedURL = [NSURL fileURLWithPath:path];
+  [savedURL setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
+  [fm setAttributes:@{ NSFileProtectionKey: NSFileProtectionComplete } ofItemAtPath:path error:nil];
+  if ([fm fileExistsAtPath:bak]) [fm setAttributes:@{ NSFileProtectionKey: NSFileProtectionComplete } ofItemAtPath:bak error:nil];
+#endif
   return YES;
 }
 NSDictionary *readEnvelope(NSString *path, NSError **error) {
@@ -298,6 +478,7 @@ BOOL savePlaintext(NSString *path, NSString *plaintext, NSData *key, BOOL backup
   envelope[@"iterations"] = old[@"iterations"];
   return writeEnvelope(envelope, path, backup, error);
 }
+#if TARGET_OS_OSX
 NSString *choosePath(BOOL save, NSString *title, NSString *defaultName) {
   if (save) {
     NSSavePanel *panel = [NSSavePanel savePanel]; panel.title = title; panel.nameFieldStringValue = defaultName;
@@ -306,6 +487,46 @@ NSString *choosePath(BOOL save, NSString *title, NSString *defaultName) {
   NSOpenPanel *panel = [NSOpenPanel openPanel]; panel.title = title; panel.canChooseDirectories = NO; panel.allowsMultipleSelection = NO;
   return [panel runModal] == NSModalResponseOK ? panel.URL.path : nil;
 }
+#endif
+
+#if TARGET_OS_IOS
+NSMutableDictionary<NSString *, NSString *> *fiotpUiResults(void) {
+  static NSMutableDictionary *results;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{ results = [NSMutableDictionary dictionary]; });
+  return results;
+}
+
+std::string startIosUi(NSString *method, NSDictionary *args) {
+  NSString *identifier = NSUUID.UUID.UUIDString;
+  FiOTPUICompletion complete = ^(BOOL ok, id data, NSString *message, NSString *code) {
+    fiotpUiResults()[identifier] = toNSString(response(ok, data, message, code));
+  };
+  if ([method isEqual:@"dialog.saveVault"]) {
+    fiotpUiResults()[identifier] = toNSString(response(YES, @{ @"path": defaultVaultPath() }));
+  } else if ([method isEqual:@"dialog.openVault"] || [method isEqual:@"dialog.openBackup"]) {
+    FiOTPDocumentPicker *picker = [FiOTPDocumentPicker new]; picker.completion = complete;
+    [picker startOpeningBackup:[method isEqual:@"dialog.openBackup"]];
+  } else if ([method isEqual:@"dialog.saveBackup"]) {
+    FiOTPDocumentPicker *picker = [FiOTPDocumentPicker new]; picker.completion = complete;
+    [picker startExporting:expandedPath(args[@"source"])];
+  } else if ([method isEqual:@"qr.scanCamera"]) {
+    AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+    void (^presentScanner)(BOOL) = ^(BOOL granted) {
+      dispatch_async(dispatch_get_main_queue(), ^{
+        if (!granted) { complete(NO, nil, @"Kamera izni verilmedi.", @"camera_permission_denied"); return; }
+        FiOTPQRScanner *scanner = [FiOTPQRScanner new]; scanner.completion = complete;
+        [fiotpPresentingController() presentViewController:scanner animated:YES completion:^{ [scanner start]; }];
+      });
+    };
+    if (status == AVAuthorizationStatusNotDetermined) [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:presentScanner];
+    else presentScanner(status == AVAuthorizationStatusAuthorized);
+  } else {
+    return failure(@"iOS üzerinde bu kullanıcı arayüzü işlemi desteklenmiyor.", @"unsupported_ui_action");
+  }
+  return response(YES, @{ @"id": identifier });
+}
+#endif
 }
 
 std::string fiotp_host_invoke(const std::string &methodValue, const std::string &payloadValue) {
@@ -314,6 +535,28 @@ std::string fiotp_host_invoke(const std::string &methodValue, const std::string 
     NSDictionary *args = parseObject(payloadValue, &error);
     if (!args) return failure(error.localizedDescription ?: @"Geçersiz istek.", @"invalid_request");
     NSString *method = toNSString(methodValue);
+    if ([method isEqual:@"platform.info"]) {
+#if TARGET_OS_IOS
+      return response(YES, @{ @"platform": @"ios" });
+#else
+      return response(YES, @{ @"platform": @"macos" });
+#endif
+    }
+    if ([method isEqual:@"vault.defaultPath"]) return response(YES, @{ @"path": defaultVaultPath() });
+#if TARGET_OS_IOS
+    if ([method isEqual:@"ui.start"]) {
+      NSDictionary *uiArgs = parseObject(toString(args[@"payload"] ?: @"{}"), &error);
+      if (!uiArgs) return failure(@"iOS arayüz isteği çözümlenemedi.", @"invalid_request");
+      return startIosUi(args[@"method"], uiArgs);
+    }
+    if ([method isEqual:@"ui.poll"]) {
+      NSString *identifier = args[@"id"];
+      NSString *finished = fiotpUiResults()[identifier];
+      if (!finished) return response(YES, @{ @"pending": @YES });
+      [fiotpUiResults() removeObjectForKey:identifier];
+      return response(YES, @{ @"pending": @NO, @"response": finished });
+    }
+#endif
     if ([method isEqual:@"vault.selectedPath"]) {
       NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:@"FiOTPSelectedVaultPath"];
       return response(YES, @{ @"path": saved ?: @"" });
@@ -327,6 +570,11 @@ std::string fiotp_host_invoke(const std::string &methodValue, const std::string 
     if ([method isEqual:@"vault.status"]) {
       NSString *path = expandedPath(args[@"path"]);
       return response(YES, @{ @"exists": @([NSFileManager.defaultManager fileExistsAtPath:path]), @"path": path });
+    }
+    if ([method isEqual:@"vault.discover"]) {
+      NSString *path = discoverIosVaultPath(expandedPath(args[@"preferredPath"]));
+      BOOL exists = [NSFileManager.defaultManager fileExistsAtPath:path];
+      return response(YES, @{ @"exists": @(exists), @"path": path });
     }
     if ([method isEqual:@"vault.create"]) {
       NSString *password = args[@"password"];
@@ -381,7 +629,12 @@ std::string fiotp_host_invoke(const std::string &methodValue, const std::string 
       chmod(destination.fileSystemRepresentation, S_IRUSR | S_IWUSR); return response(YES, @{ @"path": destination });
     }
     if ([method isEqual:@"clipboard.copy"]) {
+#if TARGET_OS_IOS
+      UIPasteboard.generalPasteboard.string = args[@"text"] ?: @"";
+#else
       NSPasteboard *p = NSPasteboard.generalPasteboard; [p clearContents]; [p setString:args[@"text"] ?: @"" forType:NSPasteboardTypeString]; return response(YES, @{});
+#endif
+      return response(YES, @{});
     }
     if ([method isEqual:@"crypto.hmac"]) {
       NSData *key = [[NSData alloc] initWithBase64EncodedString:args[@"key"] options:0];
@@ -395,15 +648,23 @@ std::string fiotp_host_invoke(const std::string &methodValue, const std::string 
       return response(YES, @{ @"digest": [digest base64EncodedStringWithOptions:0] });
     }
     if ([method isEqual:@"qr.scanCamera"]) {
+#if TARGET_OS_OSX
       FiOTPQRScanner *scanner = [FiOTPQRScanner new];
       NSString *value = [scanner scan:&error];
       return value ? response(YES, @{ @"value": value }) : failure(error.localizedDescription ?: @"QR tarama iptal edildi.", @"cancelled");
+#else
+      return failure(@"iOS QR taraması asenkron başlatılmalıdır.", @"async_ui_required");
+#endif
     }
     if ([method hasPrefix:@"dialog."]) {
+#if TARGET_OS_OSX
       BOOL save = [method isEqual:@"dialog.saveVault"] || [method isEqual:@"dialog.saveBackup"];
       BOOL backup = [method containsString:@"Backup"];
       NSString *path = choosePath(save, backup ? @"FiOTP Şifreli Yedek" : @"FiOTP Kasası", backup ? @"fiotp-backup.json" : @"kasa.json");
       return path ? response(YES, @{ @"path": path }) : failure(@"İşlem iptal edildi.", @"cancelled");
+#else
+      return failure(@"iOS dosya işlemi asenkron başlatılmalıdır.", @"async_ui_required");
+#endif
     }
     return failure([NSString stringWithFormat:@"Bilinmeyen native işlem: %@", method], @"unknown_method");
   }

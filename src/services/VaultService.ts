@@ -1,5 +1,5 @@
 import type { Account } from '../types'
-import { MacHost } from '../platform/macHost'
+import { platformHost, type PlatformHost } from '../platform/host'
 
 export interface VaultStatus {
   hasVault: boolean
@@ -21,7 +21,7 @@ interface StatusEnvelope {
 
 interface PathEnvelope {
   ok: boolean
-  data: { path: string }
+  data: { path: string; exported?: boolean }
 }
 
 interface OpenEnvelope {
@@ -34,8 +34,9 @@ interface VaultPayload {
   accounts: Account[]
 }
 
-const DEFAULT_PATH = '~/Library/Application Support/FiOTP Gea/kasa.json'
 const VAULT_PATH_KEY = 'fiotp_selected_vault_path_v1'
+type ServiceSuccess<T> = (value: T) => void
+type ServiceFailure = (error: Error) => void
 
 function validateAccounts(value: unknown): Account[] {
   if (!Array.isArray(value)) throw new Error('Kasa hesap listesi içermiyor.')
@@ -62,15 +63,27 @@ function validateAccounts(value: unknown): Account[] {
 export class VaultService {
   private accounts: Account[] = []
   private unlocked = false
-  private path = DEFAULT_PATH
+  private path = ''
   private pathLoaded = false
 
+  constructor(private readonly host: PlatformHost = platformHost) {}
+
   status(): VaultStatus {
-    if (!MacHost.available) {
+    if (!this.host.available) {
       return { hasVault: false, unlocked: this.unlocked, path: 'Web önizlemesi — kalıcı kasa yok' }
     }
     this.loadRememberedPath()
-    const envelope = JSON.parse(MacHost.invoke('vault.status', { path: this.path })) as StatusEnvelope
+    if (!this.path) {
+      const defaultEnvelope = JSON.parse(this.host.invoke('vault.defaultPath')) as PathEnvelope
+      this.path = defaultEnvelope.data.path
+    }
+    if (this.host.platform === 'ios') {
+      const discovered = JSON.parse(this.host.invoke('vault.discover', { preferredPath: this.path })) as StatusEnvelope
+      this.path = discovered.data.path
+      this.rememberPath(this.path)
+      return { hasVault: discovered.data.exists, unlocked: this.unlocked, path: discovered.data.path }
+    }
+    const envelope = JSON.parse(this.host.invoke('vault.status', { path: this.path })) as StatusEnvelope
     const native = envelope.data
     this.path = native.path
     return { hasVault: native.exists, unlocked: this.unlocked, path: native.path }
@@ -80,7 +93,7 @@ export class VaultService {
     this.requireStrongPassword(password)
     const target = path || this.path
     const payload: VaultPayload = { schema: 1, accounts: [] }
-    const envelope = JSON.parse(MacHost.invoke('vault.create', {
+    const envelope = JSON.parse(this.host.invoke('vault.create', {
       path: target,
       password,
       plaintext: JSON.stringify(payload),
@@ -94,7 +107,7 @@ export class VaultService {
   }
 
   open(password: string, path?: string): VaultStatus {
-    const envelope = JSON.parse(MacHost.invoke('vault.open', { path: path || this.path, password })) as OpenEnvelope
+    const envelope = JSON.parse(this.host.invoke('vault.open', { path: path || this.path, password })) as OpenEnvelope
     const result = envelope.data
     const payload = JSON.parse(result.plaintext) as VaultPayload
     if (payload.schema !== 1) throw new Error('Bu kasa sürümü desteklenmiyor.')
@@ -109,7 +122,7 @@ export class VaultService {
   }
 
   lock(): void {
-    if (MacHost.available) MacHost.invoke('vault.lock')
+    if (this.host.available) this.host.invoke('vault.lock')
     for (const account of this.accounts) account.secret = ''
     this.accounts = []
     this.unlocked = false
@@ -159,7 +172,7 @@ export class VaultService {
   changePassword(currentPassword: string, newPassword: string): void {
     this.requireUnlocked()
     this.requireStrongPassword(newPassword)
-    MacHost.invoke('vault.changePassword', {
+    this.host.invoke('vault.changePassword', {
       path: this.path,
       currentPassword,
       newPassword,
@@ -167,42 +180,69 @@ export class VaultService {
     })
   }
 
-  chooseVault(openExisting: boolean): VaultStatus {
-    const envelope = JSON.parse(MacHost.invoke(openExisting ? 'dialog.openVault' : 'dialog.saveVault')) as PathEnvelope
-    const selectedPath = envelope.data.path
-    if (openExisting) this.rememberPath(selectedPath)
-    const statusEnvelope = JSON.parse(MacHost.invoke('vault.status', { path: selectedPath })) as StatusEnvelope
-    return { hasVault: statusEnvelope.data.exists, unlocked: false, path: statusEnvelope.data.path }
+  chooseVault(openExisting: boolean, onSuccess: ServiceSuccess<VaultStatus>, onFailure: ServiceFailure): void {
+    this.host.invokeAsync(openExisting ? 'dialog.openVault' : 'dialog.saveVault', {}, (raw) => {
+      try {
+        const envelope = JSON.parse(raw) as PathEnvelope
+        const selectedPath = envelope.data.path
+        if (openExisting) this.rememberPath(selectedPath)
+        const statusEnvelope = JSON.parse(this.host.invoke('vault.status', { path: selectedPath })) as StatusEnvelope
+        onSuccess({ hasVault: statusEnvelope.data.exists, unlocked: false, path: statusEnvelope.data.path })
+      } catch (error) {
+        onFailure(error as Error)
+      }
+    }, onFailure)
   }
 
-  exportBackup(): string {
-    this.requireUnlocked()
-    const envelope = JSON.parse(MacHost.invoke('dialog.saveBackup')) as PathEnvelope
-    MacHost.invoke('vault.export', { source: this.path, destination: envelope.data.path })
-    return envelope.data.path
-  }
-
-  importBackup(password: string, mode: 'merge' | 'replace'): number {
-    this.requireUnlocked()
-    const selectedEnvelope = JSON.parse(MacHost.invoke('dialog.openBackup')) as PathEnvelope
-    const openEnvelope = JSON.parse(MacHost.invoke('vault.readExternal', {
-      path: selectedEnvelope.data.path,
-      password,
-    })) as OpenEnvelope
-    const result = openEnvelope.data
-    const payload = JSON.parse(result.plaintext) as VaultPayload
-    if (payload.schema !== 1) throw new Error('Yedek sürümü desteklenmiyor.')
-    const incoming = validateAccounts(payload.accounts)
-    if (mode === 'replace') {
-      this.accounts = incoming
-      this.persist()
-      return incoming.length
+  exportBackup(onSuccess: ServiceSuccess<string>, onFailure: ServiceFailure): void {
+    try {
+      this.requireUnlocked()
+      this.host.invokeAsync('dialog.saveBackup', { source: this.path }, (raw) => {
+        try {
+          const envelope = JSON.parse(raw) as PathEnvelope
+          if (!envelope.data.exported) this.host.invoke('vault.export', { source: this.path, destination: envelope.data.path })
+          onSuccess(envelope.data.path)
+        } catch (error) {
+          onFailure(error as Error)
+        }
+      }, onFailure)
+    } catch (error) {
+      onFailure(error as Error)
     }
-    return this.addAccounts(incoming)
+  }
+
+  importBackup(password: string, mode: 'merge' | 'replace', onSuccess: ServiceSuccess<number>, onFailure: ServiceFailure): void {
+    try {
+      this.requireUnlocked()
+      this.host.invokeAsync('dialog.openBackup', {}, (raw) => {
+        try {
+          const selectedEnvelope = JSON.parse(raw) as PathEnvelope
+          const openEnvelope = JSON.parse(this.host.invoke('vault.readExternal', {
+            path: selectedEnvelope.data.path,
+            password,
+          })) as OpenEnvelope
+          const result = openEnvelope.data
+          const payload = JSON.parse(result.plaintext) as VaultPayload
+          if (payload.schema !== 1) throw new Error('Yedek sürümü desteklenmiyor.')
+          const incoming = validateAccounts(payload.accounts)
+          if (mode === 'replace') {
+            this.accounts = incoming
+            this.persist()
+            onSuccess(incoming.length)
+            return
+          }
+          onSuccess(this.addAccounts(incoming))
+        } catch (error) {
+          onFailure(error as Error)
+        }
+      }, onFailure)
+    } catch (error) {
+      onFailure(error as Error)
+    }
   }
 
   private persist(): void {
-    MacHost.invoke('vault.save', { path: this.path, plaintext: this.serialize() })
+    this.host.invoke('vault.save', { path: this.path, plaintext: this.serialize() })
   }
 
   private serialize(): string {
@@ -220,9 +260,9 @@ export class VaultService {
   private loadRememberedPath(): void {
     if (this.pathLoaded) return
     this.pathLoaded = true
-    if (MacHost.available) {
+    if (this.host.available) {
       try {
-        const envelope = JSON.parse(MacHost.invoke('vault.selectedPath')) as PathEnvelope
+        const envelope = JSON.parse(this.host.invoke('vault.selectedPath')) as PathEnvelope
         if (envelope.data.path) {
           this.path = envelope.data.path
           return
@@ -231,24 +271,28 @@ export class VaultService {
         // Older hosts fall back to the web-compatible preference below.
       }
     }
-    try {
-      const saved = localStorage.getItem(VAULT_PATH_KEY)
-      if (saved) this.path = saved
-    } catch {
-      // Web preview or unavailable storage: use the documented default path.
+    if (this.host.platform === 'web') {
+      try {
+        const saved = localStorage.getItem(VAULT_PATH_KEY)
+        if (saved) this.path = saved
+      } catch {
+        // Web preview or unavailable storage: use the documented default path.
+      }
     }
   }
 
   private rememberPath(path: string): void {
     this.path = path
     this.pathLoaded = true
-    if (MacHost.available) {
-      MacHost.invoke('vault.rememberPath', { path })
+    if (this.host.available) {
+      this.host.invoke('vault.rememberPath', { path })
     }
-    try {
-      localStorage.setItem(VAULT_PATH_KEY, path)
-    } catch {
-      // Path persistence is a convenience; vault security does not depend on it.
+    if (this.host.platform === 'web') {
+      try {
+        localStorage.setItem(VAULT_PATH_KEY, path)
+      } catch {
+        // Path persistence is a convenience; vault security does not depend on it.
+      }
     }
   }
 }

@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "postinstall": "node patches/geastack-apple-macos-password.mjs",
+    "postinstall": "node patches/geastack-apple-macos-password.mjs && node patches/geastack-apple-ios-build.mjs",
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types tests/otp.test.ts && sh scripts/test-native.sh",
     "dev": "gea dev",
     "build": "gea build --target web",
-    "build:macos": "gea build --target macos && plutil -replace NSCameraUsageDescription -string 'FiOTP QR kodlarını taramak için kamerayı kullanır.' dist/macos/fiotp-gea/FiOTP.app/Contents/Info.plist && codesign --force --deep --sign - dist/macos/fiotp-gea/FiOTP.app"
+    "build:macos": "gea build --target macos && plutil -replace NSCameraUsageDescription -string 'FiOTP QR kodlarını taramak için kamerayı kullanır.' dist/macos/fiotp-gea/FiOTP.app/Contents/Info.plist && codesign --force --deep --sign - dist/macos/fiotp-gea/FiOTP.app",
+    "build:ios": "node_modules/@geastack/apple/targets/ios/build-ios.sh fiotp-gea simulator && node scripts/ios-postbuild.mjs"
   },
   "dependencies": {
     "@geajs/core": "latest",
@@ -34,7 +35,7 @@
       "rp2350": false,
       "geaos": false,
       "macos": true,
-      "ios": false,
+      "ios": true,
       "android": false,
       "windows": false
     },
