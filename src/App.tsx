@@ -530,7 +530,10 @@ export class App extends ReactiveComponent {
     const verifyAcc = vaultStore.accounts.find((a) => a.id === uiStore.verifyAccountId)
 
     return (
-      <div class="app-switch-root" data-account-count={vaultStore.totalCount}>
+      <div
+        class={`app-switch-root ${platformHost.platform === 'ios' ? 'ios-layout' : 'macos-layout'}`}
+        data-account-count={vaultStore.totalCount}
+      >
         <div class="app-stage" style={{ display: vaultStore.phase === 'unlocked' ? 'none' : 'flex' }}>
           <UnlockView
             hasVault={vaultStore.hasVault}
@@ -685,6 +688,29 @@ export class App extends ReactiveComponent {
               </button>
             </div>
 
+            <div class="pagination-row" aria-label="Hesap sayfaları">
+              <span>{vaultStore.pageStart}–{vaultStore.pageEnd} / {vaultStore.visibleCount} hesap</span>
+              <div class="pagination-actions">
+                <button
+                  class="btn-primary-add pagination-button"
+                  onClick={() => {
+                    if (vaultStore.page > 0) vaultStore.setPage(vaultStore.page - 1)
+                  }}
+                >
+                  <span>Önceki</span>
+                </button>
+                <span class="pagination-page">{vaultStore.page + 1} / {vaultStore.pageCount}</span>
+                <button
+                  class="btn-primary-add pagination-button"
+                  onClick={() => {
+                    if (vaultStore.page + 1 < vaultStore.pageCount) vaultStore.setPage(vaultStore.page + 1)
+                  }}
+                >
+                  <span>Sonraki</span>
+                </button>
+              </div>
+            </div>
+
             {/* Filter Chips Row */}
             <div class="filters-row">
               <button
@@ -726,14 +752,6 @@ export class App extends ReactiveComponent {
               <div class="count-badge-text">{vaultStore.totalCount} Aktif</div>
             </div>
 
-            <div class="pagination-row" style={{ display: vaultStore.visibleCount > 8 ? 'flex' : 'none' }}>
-              <span>{vaultStore.pageStart}–{vaultStore.pageEnd} / {vaultStore.visibleCount} hesap</span>
-              <div class="pagination-actions">
-                <button class={`filter-chip ${vaultStore.page === 0 ? 'page-disabled' : ''}`} onClick={() => vaultStore.setPage(vaultStore.page - 1)}>← Önceki</button>
-                <button class={`filter-chip ${vaultStore.page + 1 >= vaultStore.pageCount ? 'page-disabled' : ''}`} onClick={() => vaultStore.setPage(vaultStore.page + 1)}>Sonraki →</button>
-              </div>
-            </div>
-
             {/* Cards List */}
             <div class="account-list-region">
               <div class="empty-box" style={{ display: vaultStore.liveAccounts.length === 0 ? 'flex' : 'none' }}>
@@ -742,7 +760,9 @@ export class App extends ReactiveComponent {
                 <button class="btn-primary-add" style={{ marginTop: '12px' }} onClick={() => { uiStore.showAddModal = true }}>+ Hesap Ekle</button>
               </div>
               <div class="cards-list" style={{ display: vaultStore.liveAccounts.length === 0 ? 'none' : 'flex' }}>
-                {vaultStore.pageAccounts.map((account) => (
+                {(vaultStore.pageAccounts.length > 0 || vaultStore.visibleCount === 0
+                  ? vaultStore.pageAccounts
+                  : vaultStore.liveAccounts).map((account) => (
                   <AccountCard
                     key={account.id}
                     account={account}
