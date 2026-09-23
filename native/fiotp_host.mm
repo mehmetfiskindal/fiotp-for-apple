@@ -410,9 +410,15 @@ NSData *decryptPayload(NSDictionary *envelope, NSData *key, NSError **error) {
     if (error) *error = [NSError errorWithDomain:@"FiOTP" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Desteklenmeyen veya geçersiz kasa formatı."}];
     return nil;
   }
-  NSData *nonce = [[NSData alloc] initWithBase64EncodedString:envelope[@"nonce"] options:0];
-  NSData *ciphertext = [[NSData alloc] initWithBase64EncodedString:envelope[@"ciphertext"] options:0];
-  NSData *tag = [[NSData alloc] initWithBase64EncodedString:envelope[@"tag"] options:0];
+  id nonceValue = envelope[@"nonce"], ciphertextValue = envelope[@"ciphertext"], tagValue = envelope[@"tag"];
+  if (![nonceValue isKindOfClass:NSString.class] || ![ciphertextValue isKindOfClass:NSString.class] ||
+      ![tagValue isKindOfClass:NSString.class]) {
+    if (error) *error = [NSError errorWithDomain:@"FiOTP" code:2 userInfo:@{NSLocalizedDescriptionKey: @"Kasa şifreleme alanları bozuk."}];
+    return nil;
+  }
+  NSData *nonce = [[NSData alloc] initWithBase64EncodedString:nonceValue options:0];
+  NSData *ciphertext = [[NSData alloc] initWithBase64EncodedString:ciphertextValue options:0];
+  NSData *tag = [[NSData alloc] initWithBase64EncodedString:tagValue options:0];
   if (nonce.length != kNonceLength || tag.length != kTagLength || !ciphertext) {
     if (error) *error = [NSError errorWithDomain:@"FiOTP" code:2 userInfo:@{NSLocalizedDescriptionKey: @"Kasa şifreleme alanları bozuk."}];
     return nil;
@@ -452,10 +458,16 @@ NSDictionary *readEnvelope(NSString *path, NSError **error) {
 }
 NSDictionary *openAtPath(NSString *path, NSString *password, BOOL keepKey, NSError **error) {
   NSDictionary *envelope = readEnvelope(path, error);
-  NSData *salt = envelope ? [[NSData alloc] initWithBase64EncodedString:envelope[@"salt"] options:0] : nil;
-  NSNumber *iterations = envelope[@"iterations"];
   if (!envelope) return nil;
-  if (salt.length != kSaltLength || iterations.unsignedIntValue < 100000) {
+  id saltValue = envelope[@"salt"], iterationsValue = envelope[@"iterations"];
+  if (![saltValue isKindOfClass:NSString.class] || ![iterationsValue isKindOfClass:NSNumber.class]) {
+    if (error) *error = [NSError errorWithDomain:@"FiOTP" code:4 userInfo:@{NSLocalizedDescriptionKey: @"Bu dosya şifreli FiOTP kasa/yedek biçiminde değil."}];
+    return nil;
+  }
+  NSData *salt = [[NSData alloc] initWithBase64EncodedString:saltValue options:0];
+  NSNumber *iterations = iterationsValue;
+  if (salt.length != kSaltLength || iterations.doubleValue < 100000 || iterations.doubleValue > 5000000 ||
+      iterations.doubleValue != iterations.unsignedIntValue) {
     if (error) *error = [NSError errorWithDomain:@"FiOTP" code:4 userInfo:@{NSLocalizedDescriptionKey: @"Kasa KDF bilgileri geçersiz."}];
     return nil;
   }
@@ -497,18 +509,30 @@ NSMutableDictionary<NSString *, NSString *> *fiotpUiResults(void) {
   return results;
 }
 
+NSMutableDictionary<NSString *, FiOTPDocumentPicker *> *fiotpActivePickers(void) {
+  static NSMutableDictionary *pickers;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{ pickers = [NSMutableDictionary dictionary]; });
+  return pickers;
+}
+
 std::string startIosUi(NSString *method, NSDictionary *args) {
   NSString *identifier = NSUUID.UUID.UUIDString;
   FiOTPUICompletion complete = ^(BOOL ok, id data, NSString *message, NSString *code) {
     fiotpUiResults()[identifier] = toNSString(response(ok, data, message, code));
+    // UIDocumentPickerViewController.delegate is weak. Keep its separate
+    // delegate alive until selection, export or cancellation completes.
+    [fiotpActivePickers() removeObjectForKey:identifier];
   };
   if ([method isEqual:@"dialog.saveVault"]) {
     fiotpUiResults()[identifier] = toNSString(response(YES, @{ @"path": defaultVaultPath() }));
   } else if ([method isEqual:@"dialog.openVault"] || [method isEqual:@"dialog.openBackup"]) {
     FiOTPDocumentPicker *picker = [FiOTPDocumentPicker new]; picker.completion = complete;
+    fiotpActivePickers()[identifier] = picker;
     [picker startOpeningBackup:[method isEqual:@"dialog.openBackup"]];
   } else if ([method isEqual:@"dialog.saveBackup"]) {
     FiOTPDocumentPicker *picker = [FiOTPDocumentPicker new]; picker.completion = complete;
+    fiotpActivePickers()[identifier] = picker;
     [picker startExporting:expandedPath(args[@"source"])];
   } else if ([method isEqual:@"qr.scanCamera"]) {
     AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
