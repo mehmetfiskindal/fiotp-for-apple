@@ -16,7 +16,7 @@ import { vaultService } from './services/VaultService'
 import { vaultStore } from './stores/VaultStore'
 import { platformHost } from './platform/host'
 import UnlockView from './components/UnlockView'
-import AccountList from './components/AccountList'
+import AccountCard from './components/AccountCard'
 import './styles.css'
 
 function safeCopy(text: string): void {
@@ -239,7 +239,7 @@ export class App extends ReactiveComponent {
       }
       vaultStore.open(password, vaultStore.vaultPath)
       vaultStore.error = ''
-      this.showToast(vaultStore.totalCount ? 'Kasa kilidi açıldı' : 'Güvenli boş kasa hazır')
+      this.showToast(`Kasa açıldı · ${vaultStore.totalCount} hesap`)
       return true
     } catch (e) {
       vaultStore.error = `Kasa açılamadı: ${unlockErrorMessage(e)}`
@@ -761,21 +761,32 @@ export class App extends ReactiveComponent {
                 {`HOTP (${vaultStore.hotpCount})`}
               </button>
 
-              <div class="count-badge-text">{vaultStore.visibleAccounts.length} Aktif</div>
+              <div class="count-badge-text">{vaultStore.totalCount} Aktif</div>
             </div>
 
             {/* Cards List */}
-            <AccountList
-              accounts={vaultStore.liveAccounts}
-              copiedId={this.copiedId}
-              onAddAccount={() => { this.showAddModal = true }}
-              onToggleFavorite={(id: string) => this.toggleFavorite(id)}
-              onIncrementHotp={(id: string) => this.incrementHotp(id)}
-              onCopy={(id: string, code: string) => this.copyCode(code, id)}
-              onShowQr={(id: string) => this.openQr(id)}
-              onVerify={(id: string) => this.openVerify(id)}
-              onDelete={(id: string) => this.deleteAccount(id)}
-            />
+            <div class="account-list-region">
+              <div class="empty-box" style={{ display: vaultStore.liveAccounts.length === 0 ? 'flex' : 'none' }}>
+                <div class="empty-title">Henüz hesap yok</div>
+                <div class="empty-body">QR tarayarak, URI yapıştırarak veya manuel girerek hesap ekleyin.</div>
+                <button class="btn-primary-add" style={{ marginTop: '12px' }} onClick={() => { this.showAddModal = true }}>+ Hesap Ekle</button>
+              </div>
+              <div class="cards-list" style={{ display: vaultStore.liveAccounts.length === 0 ? 'none' : 'flex' }}>
+                {vaultStore.liveAccounts.map((account) => (
+                  <AccountCard
+                    key={account.id}
+                    account={account}
+                    copied={this.copiedId === account.id}
+                    onToggleFavorite={(id: string) => this.toggleFavorite(id)}
+                    onIncrementHotp={(id: string) => this.incrementHotp(id)}
+                    onCopy={(id: string, code: string) => this.copyCode(code, id)}
+                    onShowQr={(id: string) => this.openQr(id)}
+                    onVerify={(id: string) => this.openVerify(id)}
+                    onDelete={(id: string) => this.deleteAccount(id)}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 

@@ -408,6 +408,7 @@ html, body {
   display: flex;
   flex-direction: row;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -540,10 +541,12 @@ html, body {
    ========================================== */
 .main-view {
   flex: 1;
+  min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background-color: #121318;
-  overflow-y: auto;
+  overflow: hidden;
   padding-top: 20px;
   padding-bottom: 20px;
   padding-left: 24px;
@@ -638,6 +641,15 @@ html, body {
   flex-direction: column;
   gap: 12px;
   padding-bottom: 30px;
+}
+
+.account-list-region {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .totp-card {
@@ -1004,6 +1016,7 @@ html, body {
 
 .input-submit-wrap {
   width: 100%;
+  min-height: 46px;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1022,20 +1035,25 @@ html, body {
 
 .password-input {
   flex: 1;
+  height: 46px;
+  min-height: 46px;
   background-color: transparent;
   border-width: 0;
-  padding-top: 10px;
-  padding-bottom: 10px;
+  padding-top: 0;
+  padding-bottom: 0;
   padding-left: 14px;
   padding-right: 14px;
   color: #e3e1e9;
   font-size: 14px;
+  line-height: normal;
+  text-align: center;
 }
 
 .btn-open-submit {
   background-color: #4d8eff;
   color: #ffffff;
   border-width: 0;
+  align-self: stretch;
   padding-top: 10px;
   padding-bottom: 10px;
   padding-left: 16px;
@@ -1360,6 +1378,7 @@ html, body {
   .sidebar .side-heading, .sidebar .status-card { display: none; }
   .sidebar .side-item { width: auto; min-width: max-content; padding: 8px 10px; }
   .body-layout .main-view { min-width: 0; padding: 12px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .main-view .account-list-region { min-height: auto; overflow: visible; }
   .main-view .filters-row { gap: 6px; overflow-x: auto; padding-bottom: 6px; }
   .filters-row .filter-chip, .filters-row .count-badge-text { min-width: max-content; }
   .main-view .totp-card { flex-direction: column; align-items: stretch; gap: 12px; padding: 14px; }
