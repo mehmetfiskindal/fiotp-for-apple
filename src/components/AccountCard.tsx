@@ -1,5 +1,6 @@
-import { vaultStore, type LiveAccount } from '../stores/VaultStore'
+import type { LiveAccount } from '../stores/VaultStore'
 import { Component, type GeaElement } from '@geastack/core'
+import TotpCountdown from './TotpCountdown'
 
 export interface AccountCardProps {
   key?: string
@@ -17,10 +18,6 @@ export default class AccountCard extends Component<GeaElement, AccountCardProps>
   template(props: AccountCardProps) {
     const { account: acc, copied, onToggleFavorite, onIncrementHotp, onCopy, onShowQr, onVerify, onDelete } = props
     const initials = (acc.issuer || '??').slice(0, 2).toUpperCase()
-    const remainingSeconds = acc.type === 'totp'
-      ? acc.period - (vaultStore.clockSeconds % acc.period)
-      : 0
-
     return (
     <div class="totp-card" key={acc.id}>
       <div class="card-left">
@@ -40,11 +37,7 @@ export default class AccountCard extends Component<GeaElement, AccountCardProps>
 
       <div class="card-right">
         {acc.type === 'totp' ? (
-          <div class="timer-ring-wrap">
-            <div class={`timer-ring-bg ${remainingSeconds <= 5 ? 'danger' : remainingSeconds <= 10 ? 'warning' : ''}`}>
-              <div class="timer-ring-inner">{remainingSeconds}</div>
-            </div>
-          </div>
+          <TotpCountdown period={acc.period} />
         ) : (
           <button class="btn-card-action" onClick={() => onIncrementHotp(acc.id)}>Sayaç {acc.counter ?? 0} +</button>
         )}

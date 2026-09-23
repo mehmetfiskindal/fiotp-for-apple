@@ -11,12 +11,6 @@ class VaultStore extends Store {
   accounts: Account[] = []
   visibleAccounts: Account[] = []
   liveAccounts: LiveAccount[] = []
-  pageAccounts: LiveAccount[] = []
-  page = 0
-  pageCount = 1
-  pageStart = 0
-  pageEnd = 0
-  visibleCount = 0
   clockSeconds = 0
   private lastLiveEpoch = 0
   totalCount = 0
@@ -32,7 +26,6 @@ class VaultStore extends Store {
 
   get unlocked() { return this.phase === 'unlocked' }
   rebuildView() {
-    this.page = 0
     const q = this.search.trim().toLowerCase()
     const visible: Account[] = []
     let favorites = 0
@@ -62,16 +55,21 @@ class VaultStore extends Store {
 
   tick(epochSeconds: number) {
     if (!this.unlocked) return
-    // The card countdown observes this scalar. Rebuilding the account array
-    // every second would remount cards and reset the native scroll position.
+    // Keep the account array stable while scrolling. Only the small countdown
+    // component observes this scalar, and an expired TOTP updates its code in
+    // the existing account object rather than remounting the whole list.
     this.clockSeconds = epochSeconds
-    for (const account of this.visibleAccounts) {
+    for (let index = 0; index < this.visibleAccounts.length; index++) {
+      const account = this.visibleAccounts[index]
       if (account.type === 'totp' &&
           Math.floor(epochSeconds / account.period) !== Math.floor(this.lastLiveEpoch / account.period)) {
-        this.rebuildLive(epochSeconds)
-        return
+        const generated = generateTotp(account.secret, account.period, account.digits,
+          account.algorithm, epochSeconds * 1000)
+        this.liveAccounts[index].liveCode = generated.formattedCode
+        this.liveAccounts[index].remainingSeconds = generated.remainingSeconds
       }
     }
+    this.lastLiveEpoch = epochSeconds
   }
 
   private rebuildLive(epochSeconds: number) {
@@ -96,24 +94,6 @@ class VaultStore extends Store {
     }
     this.lastLiveEpoch = epochSeconds
     this.liveAccounts = live
-    this.updatePage()
-  }
-
-  private updatePage() {
-    const size = 8
-    this.visibleCount = this.liveAccounts.length
-    this.pageCount = Math.max(1, Math.ceil(this.visibleCount / size))
-    if (this.page >= this.pageCount) this.page = this.pageCount - 1
-    const offset = this.page * size
-    this.pageStart = this.visibleCount === 0 ? 0 : offset + 1
-    this.pageEnd = Math.min(offset + size, this.visibleCount)
-    this.pageAccounts = this.liveAccounts.slice(offset, offset + size)
-  }
-
-  setPage(next: number) {
-    if (next < 0 || next >= this.pageCount || next === this.page) return
-    this.page = next
-    this.updatePage()
   }
 
   setSearch(value: string) { this.search = value; this.rebuildView() }

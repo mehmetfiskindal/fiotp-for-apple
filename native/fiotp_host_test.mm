@@ -51,6 +51,7 @@ int main() {
 
     stored = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
     NSMutableDictionary *envelope = [[NSJSONSerialization JSONObjectWithData:[stored dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingMutableContainers error:nil] mutableCopy];
+    NSDictionary *validEnvelope = [envelope copy];
     NSString *ciphertext = envelope[@"ciphertext"];
     unichar replacement = [ciphertext characterAtIndex:0] == 'A' ? 'B' : 'A';
     envelope[@"ciphertext"] = [NSString stringWithFormat:@"%C%@", replacement, [ciphertext substringFromIndex:1]];
@@ -62,6 +63,22 @@ int main() {
     NSDictionary *externalRejected = call("vault.readExternal", @{ @"path": path, @"password": @"correct horse battery" });
     assert(![externalRejected[@"ok"] boolValue]);
     (void)rejected;
+
+    // A Files-picked JSON document may look like a backup but contain fields
+    // of the wrong type. Native decoding must return an error, never abort.
+    NSString *invalidPath = [dir stringByAppendingPathComponent:@"invalid-backup.json"];
+    NSArray<NSDictionary *> *invalidFields = @[
+      @{ @"salt": @42 }, @{ @"iterations": @"600000" },
+      @{ @"nonce": @42 }, @{ @"ciphertext": @[] }, @{ @"tag": NSNull.null },
+    ];
+    for (NSDictionary *replacementFields in invalidFields) {
+      NSMutableDictionary *invalid = [validEnvelope mutableCopy];
+      [invalid addEntriesFromDictionary:replacementFields];
+      NSData *invalidJson = [NSJSONSerialization dataWithJSONObject:invalid options:0 error:nil];
+      assert([invalidJson writeToFile:invalidPath atomically:YES]);
+      NSDictionary *result = call("vault.readExternal", @{ @"path": invalidPath, @"password": @"correct horse battery" });
+      assert(![result[@"ok"] boolValue]);
+    }
 
     [[NSFileManager defaultManager] removeItemAtPath:dir error:nil];
     NSLog(@"Native encrypted vault tests passed");

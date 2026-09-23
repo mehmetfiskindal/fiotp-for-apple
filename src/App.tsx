@@ -51,11 +51,6 @@ function unlockErrorMessage(error: unknown): string {
 }
 
 export class App extends ReactiveComponent {
-  // epochSeconds stores floor(Date.now()/1000).
-  // Updated via requestAnimationFrame which runs in the native frame loop
-  // and correctly triggers reactive re-renders — setInterval callbacks do not.
-  // Used directly in TOTP math so the compiler cannot optimize the read away.
-  epochSeconds = 0
   lastActivityTime = 0
 
   private initialized = false
@@ -66,7 +61,6 @@ export class App extends ReactiveComponent {
     if (this.initialized) return
     this.initialized = true
     this.lastActivityTime = Date.now()
-    this.epochSeconds = Math.floor(Date.now() / 1000)
     // Start at the vault chooser. Creating a vault is an explicit action;
     // don't put first-run users directly into the creation form.
     this.loadState()
@@ -74,10 +68,13 @@ export class App extends ReactiveComponent {
   }
 
   startRafLoop() {
+    // The native frame callback drives the clock, but its bookkeeping must
+    // not mutate root component state and redraw the entire scrolling view.
+    let lastTickSeconds = Math.floor(Date.now() / 1000)
     const loop = () => {
       const s = Math.floor(Date.now() / 1000)
-      if (s !== this.epochSeconds) {
-        this.epochSeconds = s
+      if (s !== lastTickSeconds) {
+        lastTickSeconds = s
         vaultStore.tick(s)
         // Auto-lock check on each second boundary
         if (
@@ -726,14 +723,6 @@ export class App extends ReactiveComponent {
               <div class="count-badge-text">{vaultStore.totalCount} Aktif</div>
             </div>
 
-            <div class="pagination-row" style={{ display: vaultStore.visibleCount > 8 ? 'flex' : 'none' }}>
-              <span>{vaultStore.pageStart}–{vaultStore.pageEnd} / {vaultStore.visibleCount} hesap</span>
-              <div class="pagination-actions">
-                <button class={`filter-chip ${vaultStore.page === 0 ? 'page-disabled' : ''}`} onClick={() => vaultStore.setPage(vaultStore.page - 1)}>← Önceki</button>
-                <button class={`filter-chip ${vaultStore.page + 1 >= vaultStore.pageCount ? 'page-disabled' : ''}`} onClick={() => vaultStore.setPage(vaultStore.page + 1)}>Sonraki →</button>
-              </div>
-            </div>
-
             {/* Cards List */}
             <div class="account-list-region">
               <div class="empty-box" style={{ display: vaultStore.liveAccounts.length === 0 ? 'flex' : 'none' }}>
@@ -742,7 +731,7 @@ export class App extends ReactiveComponent {
                 <button class="btn-primary-add" style={{ marginTop: '12px' }} onClick={() => { uiStore.showAddModal = true }}>+ Hesap Ekle</button>
               </div>
               <div class="cards-list" style={{ display: vaultStore.liveAccounts.length === 0 ? 'none' : 'flex' }}>
-                {vaultStore.pageAccounts.map((account) => (
+                {vaultStore.liveAccounts.map((account) => (
                   <AccountCard
                     key={account.id}
                     account={account}

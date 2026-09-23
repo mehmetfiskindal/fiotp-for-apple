@@ -16,7 +16,7 @@ export interface AccountListProps {
 export default class AccountList extends Component<GeaElement, AccountListProps> {
   template(props: AccountListProps) {
     const { copiedId, onAddAccount, onToggleFavorite, onIncrementHotp, onCopy, onShowQr, onVerify, onDelete } = props
-    const accounts = vaultStore.pageAccounts
+    const accounts = vaultStore.liveAccounts
 
     return (
       <div class="account-list-region">
