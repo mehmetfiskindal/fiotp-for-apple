@@ -230,6 +230,7 @@ html, body {
    App Container & TitleBar
    ========================================== */
 .root-layout {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -652,6 +653,29 @@ html, body {
   overscroll-behavior: contain;
 }
 
+.pagination-row {
+  min-height: 40px;
+  padding: 4px 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #8c909f;
+  font-size: 12px;
+}
+
+.pagination-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.pagination-actions .filter-chip {
+  min-width: 92px;
+}
+
+.pagination-actions .page-disabled {
+  opacity: 0.4;
+}
+
 .totp-card {
   display: flex;
   flex-direction: row;
@@ -768,16 +792,16 @@ html, body {
 
 /* Timer Ring */
 .timer-ring-wrap {
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .timer-ring-bg {
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -796,15 +820,16 @@ html, body {
 }
 
 .timer-ring-inner {
-  width: 25px;
-  height: 25px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background-color: #1a1b21;
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: 'Inter';
-  font-size: 10px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 /* Code Box */
@@ -1169,7 +1194,9 @@ html, body {
 .overlay-backdrop {
   position: absolute;
   top: 0;
-  left: 0;
+  /* The native hit tester can still visit an opacity:0 overlay. Keep closed
+     dialogs physically outside the window so they cannot swallow clicks. */
+  left: -10000px;
   width: 100%;
   height: 100%;
   background-color: #0c0d12;
@@ -1177,6 +1204,14 @@ html, body {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.overlay-backdrop.is-open {
+  left: 0;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .modal-box {
@@ -1314,6 +1349,8 @@ html, body {
 /* Toast Floating */
 .toast-bar {
   position: absolute;
+  opacity: 0;
+  pointer-events: none;
   bottom: 40px;
   right: 24px;
   background-color: #1e1f25;
@@ -1331,6 +1368,11 @@ html, body {
   align-items: center;
   gap: 8px;
   z-index: 2000;
+}
+
+.toast-bar.is-open {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .toast-check {

@@ -8,12 +8,11 @@ import {
   buildOtpAuthUri,
   parseMigrationUri,
   formatCode,
-  type OtpAlgorithm,
-  type OtpType,
 } from './crypto/totp'
 import type { Account } from './types'
 import { vaultService } from './services/VaultService'
 import { vaultStore } from './stores/VaultStore'
+import { uiStore } from './stores/UiStore'
 import { platformHost } from './platform/host'
 import UnlockView from './components/UnlockView'
 import AccountCard from './components/AccountCard'
@@ -52,49 +51,12 @@ function unlockErrorMessage(error: unknown): string {
 }
 
 export class App extends ReactiveComponent {
-  passwordResetToken = 0
-  creatingVault = false
-  copiedId = ''
   // epochSeconds stores floor(Date.now()/1000).
   // Updated via requestAnimationFrame which runs in the native frame loop
   // and correctly triggers reactive re-renders — setInterval callbacks do not.
   // Used directly in TOTP math so the compiler cannot optimize the read away.
   epochSeconds = 0
   lastActivityTime = 0
-
-  // Modals & Dialogs
-  showAddModal = false
-  showSettingsModal = false
-  showQrModal = false
-  selectedQrUri = ''
-  selectedQrIssuer = ''
-  verifyAccountId = ''
-  verifyInput = ''
-  verifyResult = ''
-  activeMenuAccountId = ''
-  toastMessage = ''
-
-  // Add Account Form State
-  addTab: 'manual' | 'uri' = 'manual'
-  newType: OtpType = 'totp'
-  newIssuer = ''
-  newAccount = ''
-  newSecret = ''
-  newAlgorithm: OtpAlgorithm = 'SHA1'
-  newDigits = 6
-  newPeriod = '30'
-  newCounter = '0'
-  newTag: 'is' | 'kisisel' = 'kisisel'
-  uriInput = ''
-  addError = ''
-
-  // Settings State
-  currentPass = ''
-  nextPass = ''
-  confirmPass = ''
-  importJsonInput = ''
-  settingsMessage = ''
-  settingsError = ''
 
   private initialized = false
   private toastTimerId: any = null
@@ -150,17 +112,17 @@ export class App extends ReactiveComponent {
   loadState(showCreateFormWhenEmpty = false) {
     try {
       vaultStore.loadStatus()
-      this.creatingVault = showCreateFormWhenEmpty && !vaultStore.hasVault
+      uiStore.creatingVault = showCreateFormWhenEmpty && !vaultStore.hasVault
     } catch (e) {
       vaultStore.error = (e as Error).message
     }
   }
 
   showToast(msg: string) {
-    this.toastMessage = msg
+    uiStore.toastMessage = msg
     if (this.toastTimerId) clearTimeout(this.toastTimerId)
     this.toastTimerId = setTimeout(() => {
-      this.toastMessage = ''
+      uiStore.toastMessage = ''
     }, 2500)
   }
 
@@ -168,10 +130,10 @@ export class App extends ReactiveComponent {
     this.recordActivity()
     const raw = code.replace(/\s/g, '')
     safeCopy(raw)
-    this.copiedId = id
+    uiStore.copiedId = id
     if (this.copyTimerId) clearTimeout(this.copyTimerId)
     this.copyTimerId = setTimeout(() => {
-      this.copiedId = ''
+      uiStore.copiedId = ''
     }, 1500)
     this.showToast(`Kod panoya kopyalandı (${raw})`)
   }
@@ -199,7 +161,7 @@ export class App extends ReactiveComponent {
     const changed = accounts.find((a) => a.id === id)
     if (changed) vaultService.updateAccount(id, { favorite: changed.favorite })
     vaultStore.refresh()
-    this.activeMenuAccountId = ''
+    uiStore.activeMenuAccountId = ''
   }
 
   setTag(id: string, tag: 'is' | 'kisisel') {
@@ -210,28 +172,28 @@ export class App extends ReactiveComponent {
     const changed = accounts.find((a) => a.id === id)
     if (changed) vaultService.updateAccount(id, { tags: changed.tags })
     vaultStore.refresh()
-    this.activeMenuAccountId = ''
+    uiStore.activeMenuAccountId = ''
   }
 
   deleteAccount(id: string) {
     this.recordActivity()
     vaultService.removeAccount(id)
     this.refreshAccounts()
-    this.activeMenuAccountId = ''
+    uiStore.activeMenuAccountId = ''
     this.showToast('Hesap silindi')
   }
 
   lockVault() {
     vaultStore.lock()
-    this.passwordResetToken++
+    uiStore.passwordResetToken++
     vaultStore.error = ''
-    this.creatingVault = false
+    uiStore.resetForLock()
   }
 
   unlockVault(password: string): boolean {
     this.recordActivity()
     try {
-      if (!vaultStore.hasVault || this.creatingVault) {
+      if (!vaultStore.hasVault || uiStore.creatingVault) {
         throw new Error('Önce mevcut bir kasa seçin.')
       }
       if (!password.length) {
@@ -250,12 +212,12 @@ export class App extends ReactiveComponent {
   createVault(password: string, confirmation: string): boolean {
     this.recordActivity()
     try {
-      if (!this.creatingVault) throw new Error('Önce yeni kasa konumunu seçin.')
+      if (!uiStore.creatingVault) throw new Error('Önce yeni kasa konumunu seçin.')
       if (password !== confirmation) {
         throw new Error('Parolalar eşleşmiyor.')
       }
       vaultStore.create(password, vaultStore.vaultPath)
-      this.creatingVault = false
+      uiStore.creatingVault = false
       vaultStore.error = ''
       this.showToast('Güvenli boş kasa oluşturuldu')
       return true
@@ -267,8 +229,8 @@ export class App extends ReactiveComponent {
         // user in a create form that can never succeed.
         try {
           const status = vaultStore.loadStatus()
-          this.creatingVault = false
-          this.passwordResetToken++
+          uiStore.creatingVault = false
+          uiStore.passwordResetToken++
           vaultStore.error = status.hasVault
             ? 'Bu konumda zaten bir kasa var. Yeni parola oluşturmayın; mevcut kasa parolanızı girin.'
             : unlockErrorMessage(e)
@@ -285,8 +247,8 @@ export class App extends ReactiveComponent {
   chooseVault(openExisting: boolean) {
     vaultService.chooseVault(openExisting, (status) => {
       vaultStore.select(status)
-      this.creatingVault = !openExisting && !status.hasVault
-      this.passwordResetToken++
+      uiStore.creatingVault = !openExisting && !status.hasVault
+      uiStore.passwordResetToken++
       vaultStore.error = ''
       if (openExisting && !status.hasVault) {
         vaultStore.error = 'Seçilen dosya kasa olarak bulunamadı. Şifreli FiOTP .json kasa dosyasını seçin.'
@@ -302,34 +264,34 @@ export class App extends ReactiveComponent {
     platformHost.invokeAsync('qr.scanCamera', {}, (raw) => {
       try {
         const envelope = JSON.parse(raw) as { ok: boolean; data: { value: string } }
-        this.uriInput = envelope.data.value
-        this.addTab = 'uri'
-        this.addError = ''
+        uiStore.uriInput = envelope.data.value
+        uiStore.addTab = 'uri'
+        uiStore.addError = ''
         // Camera scanning is an import action, not merely a URI capture step.
         // Persist the decoded account(s) immediately so users do not have to
         // discover and press a second button after the scanner closes.
         this.saveNewAccount()
       } catch (e) {
-        this.addError = (e as Error).message
+        uiStore.addError = (e as Error).message
       }
     }, (e) => {
-      if (!(e as Error).message.includes('iptal')) this.addError = (e as Error).message
+      if (!(e as Error).message.includes('iptal')) uiStore.addError = (e as Error).message
     })
   }
 
   openVerify(id: string) {
     this.recordActivity()
-    this.verifyAccountId = id
-    this.verifyInput = ''
-    this.verifyResult = ''
+    uiStore.verifyAccountId = id
+    uiStore.verifyInput = ''
+    uiStore.verifyResult = ''
   }
 
   checkVerify() {
     this.recordActivity()
-    const acc = vaultStore.accounts.find((a) => a.id === this.verifyAccountId)
+    const acc = vaultStore.accounts.find((a) => a.id === uiStore.verifyAccountId)
     if (!acc) return
 
-    const entered = this.verifyInput.trim().replace(/\s/g, '')
+    const entered = uiStore.verifyInput.trim().replace(/\s/g, '')
 
     if (acc.type === 'hotp') {
       const key = base32Decode(acc.secret)
@@ -347,12 +309,12 @@ export class App extends ReactiveComponent {
           const nextCounter = start + offset + 1
           vaultService.updateAccount(acc.id, { counter: nextCounter })
           this.refreshAccounts()
-          this.verifyResult = 'success'
+          uiStore.verifyResult = 'success'
           this.showToast('HOTP sayacı güvenli biçimde ilerletildi')
           return
         }
       }
-      this.verifyResult = 'error'
+      uiStore.verifyResult = 'error'
       return
     }
 
@@ -366,31 +328,31 @@ export class App extends ReactiveComponent {
       Date.now()
     )
 
-    this.verifyResult = valid ? 'success' : 'error'
+    uiStore.verifyResult = valid ? 'success' : 'error'
   }
 
   openQr(id: string) {
     this.recordActivity()
     const acc = vaultStore.accounts.find((a) => a.id === id)
     if (!acc) return
-    this.selectedQrIssuer = acc.issuer
-    this.selectedQrUri = buildOtpAuthUri(acc)
-    this.showQrModal = true
+    uiStore.selectedQrIssuer = acc.issuer
+    uiStore.selectedQrUri = buildOtpAuthUri(acc)
+    uiStore.showQrModal = true
   }
 
   saveNewAccount() {
     this.recordActivity()
-    this.addError = ''
+    uiStore.addError = ''
 
-    if (this.addTab === 'uri') {
-      const u = this.uriInput.trim()
+    if (uiStore.addTab === 'uri') {
+      const u = uiStore.uriInput.trim()
 
       // 1. Google Authenticator Migration Protobuf URI
       if (u.startsWith('otpauth-migration://')) {
         try {
           const migrated = parseMigrationUri(u)
           if (migrated.length === 0) {
-            this.addError = 'Aktarılacak hesap bulunamadı.'
+            uiStore.addError = 'Aktarılacak hesap bulunamadı.'
             return
           }
           const newAccounts: Account[] = []
@@ -414,7 +376,7 @@ export class App extends ReactiveComponent {
           }
           const added = vaultService.addAccounts(newAccounts)
           this.refreshAccounts()
-          this.showAddModal = false
+          uiStore.showAddModal = false
           const skipped = newAccounts.length - added
           if (added === 0) {
             this.showToast(`${skipped} hesap zaten kasada mevcut; yeni hesap eklenmedi`)
@@ -425,14 +387,14 @@ export class App extends ReactiveComponent {
           }
           return
         } catch (e) {
-          this.addError = `Google Authenticator aktarımı başarısız: ${(e as Error).message}`
+          uiStore.addError = `Google Authenticator aktarımı başarısız: ${(e as Error).message}`
           return
         }
       }
 
       // 2. Standard otpauth:// URI
       if (!u.startsWith('otpauth://')) {
-        this.addError = 'Geçersiz URI: "otpauth://totp/..." veya "otpauth-migration://..." olmalıdır.'
+        uiStore.addError = 'Geçersiz URI: "otpauth://totp/..." veya "otpauth-migration://..." olmalıdır.'
         return
       }
 
@@ -454,40 +416,40 @@ export class App extends ReactiveComponent {
         }
         vaultService.addAccount(newAcc)
         this.refreshAccounts()
-        this.showAddModal = false
+        uiStore.showAddModal = false
         this.showToast(`${parsed.issuer} hesabı eklendi`)
         return
       } catch (e) {
-        this.addError = `URI ayrıştırılamadı: ${(e as Error).message}`
+        uiStore.addError = `URI ayrıştırılamadı: ${(e as Error).message}`
         return
       }
     }
 
     // Manual Form
-    const issuer = this.newIssuer.trim()
-    const account = this.newAccount.trim()
-    const secret = this.newSecret.trim().toUpperCase().replace(/[\s-]/g, '')
+    const issuer = uiStore.newIssuer.trim()
+    const account = uiStore.newAccount.trim()
+    const secret = uiStore.newSecret.trim().toUpperCase().replace(/[\s-]/g, '')
 
     if (!issuer) {
-      this.addError = 'Lütfen servis / sağlayıcı adını girin.'
+      uiStore.addError = 'Lütfen servis / sağlayıcı adını girin.'
       return
     }
     if (!account) {
-      this.addError = 'Lütfen hesap adı / e-posta girin.'
+      uiStore.addError = 'Lütfen hesap adı / e-posta girin.'
       return
     }
     if (!secret) {
-      this.addError = 'Lütfen Base32 gizli anahtarını girin.'
+      uiStore.addError = 'Lütfen Base32 gizli anahtarını girin.'
       return
     }
 
     try {
       base32Decode(secret)
-      if (this.newType === 'totp') {
-        generateTotp(secret, parseInt(this.newPeriod, 10) || 30, this.newDigits, this.newAlgorithm, Date.now())
+      if (uiStore.newType === 'totp') {
+        generateTotp(secret, parseInt(uiStore.newPeriod, 10) || 30, uiStore.newDigits, uiStore.newAlgorithm, Date.now())
       }
     } catch (err) {
-      this.addError = `Geçersiz gizli anahtar: ${(err as Error).message}`
+      uiStore.addError = `Geçersiz gizli anahtar: ${(err as Error).message}`
       return
     }
 
@@ -496,76 +458,76 @@ export class App extends ReactiveComponent {
       issuer,
       account,
       secret,
-      algorithm: this.newAlgorithm,
-      digits: this.newDigits,
-      period: parseInt(this.newPeriod, 10) || 30,
-      type: this.newType,
-      counter: parseInt(this.newCounter, 10) || 0,
+      algorithm: uiStore.newAlgorithm,
+      digits: uiStore.newDigits,
+      period: parseInt(uiStore.newPeriod, 10) || 30,
+      type: uiStore.newType,
+      counter: parseInt(uiStore.newCounter, 10) || 0,
       favorite: false,
-      tags: [this.newTag],
+      tags: [uiStore.newTag],
       createdAt: Date.now(),
     }
 
     vaultService.addAccount(newAcc)
     this.refreshAccounts()
-    this.showAddModal = false
+    uiStore.showAddModal = false
     this.showToast(`${issuer} hesabı eklendi`)
   }
 
   savePasswordChange() {
     this.recordActivity()
-    this.settingsError = ''
-    this.settingsMessage = ''
+    uiStore.settingsError = ''
+    uiStore.settingsMessage = ''
 
-    if (this.nextPass.length < 8) {
-      this.settingsError = 'Yeni parola en az 8 karakter olmalıdır.'
+    if (uiStore.nextPass.length < 8) {
+      uiStore.settingsError = 'Yeni parola en az 8 karakter olmalıdır.'
       return
     }
-    if (this.nextPass !== this.confirmPass) {
-      this.settingsError = 'Yeni parolalar birbiriyle eşleşmiyor.'
+    if (uiStore.nextPass !== uiStore.confirmPass) {
+      uiStore.settingsError = 'Yeni parolalar birbiriyle eşleşmiyor.'
       return
     }
 
     try {
-      vaultService.changePassword(this.currentPass, this.nextPass)
+      vaultService.changePassword(uiStore.currentPass, uiStore.nextPass)
       vaultStore.hasVault = true
-      this.currentPass = ''
-      this.nextPass = ''
-      this.confirmPass = ''
-      this.settingsMessage = 'Master parola başarıyla güncellendi.'
+      uiStore.currentPass = ''
+      uiStore.nextPass = ''
+      uiStore.confirmPass = ''
+      uiStore.settingsMessage = 'Master parola başarıyla güncellendi.'
     } catch (e) {
-      this.settingsError = (e as Error).message
+      uiStore.settingsError = (e as Error).message
     }
   }
 
   importBackup(mode: 'merge' | 'replace' = 'merge') {
     this.recordActivity()
-    this.settingsError = ''
-    this.settingsMessage = ''
+    uiStore.settingsError = ''
+    uiStore.settingsMessage = ''
 
-    vaultService.importBackup(this.importJsonInput, mode, (count) => {
+    vaultService.importBackup(uiStore.importJsonInput, mode, (count) => {
       this.refreshAccounts()
-      this.importJsonInput = ''
-      this.settingsMessage = `${count} hesap şifreli yedekten içe aktarıldı.`
+      uiStore.importJsonInput = ''
+      uiStore.settingsMessage = `${count} hesap şifreli yedekten içe aktarıldı.`
     }, (e) => {
-      this.settingsError = `İçe aktarma hatası: ${(e as Error).message}`
+      uiStore.settingsError = `İçe aktarma hatası: ${(e as Error).message}`
     })
   }
 
   exportBackup() {
     this.recordActivity()
-    this.settingsError = ''
+    uiStore.settingsError = ''
     vaultService.exportBackup((path) => {
-      this.settingsMessage = `Şifreli yedek kaydedildi: ${path}`
+      uiStore.settingsMessage = `Şifreli yedek kaydedildi: ${path}`
     }, (e) => {
-      if (!(e as Error).message.includes('iptal')) this.settingsError = (e as Error).message
+      if (!(e as Error).message.includes('iptal')) uiStore.settingsError = (e as Error).message
     })
   }
 
   template() {
     this.init()
 
-    const verifyAcc = vaultStore.accounts.find((a) => a.id === this.verifyAccountId)
+    const verifyAcc = vaultStore.accounts.find((a) => a.id === uiStore.verifyAccountId)
 
     return (
       <div class="app-switch-root" data-account-count={vaultStore.totalCount}>
@@ -575,16 +537,16 @@ export class App extends ReactiveComponent {
             vaultLocation={vaultLocationLabel()}
             error={vaultStore.error}
             isIOS={platformHost.platform === 'ios'}
-            creatingVault={this.creatingVault}
-            resetToken={this.passwordResetToken}
+            creatingVault={uiStore.creatingVault}
+            resetToken={uiStore.passwordResetToken}
             busy={vaultStore.phase === 'opening'}
             onUnlock={(password: string) => this.unlockVault(password)}
             onCreate={(password: string, confirmation: string) => this.createVault(password, confirmation)}
             onSelectVault={() => this.chooseVault(true)}
             onCreateVault={() => this.chooseVault(false)}
             onCancelCreate={() => {
-              this.creatingVault = false
-              this.passwordResetToken++
+              uiStore.creatingVault = false
+              uiStore.passwordResetToken++
             }}
           />
         </div>
@@ -621,8 +583,8 @@ export class App extends ReactiveComponent {
             class="btn-primary-add"
             onClick={() => {
               this.recordActivity()
-              this.showAddModal = true
-              this.addError = ''
+              uiStore.showAddModal = true
+              uiStore.addError = ''
             }}
           >
             + Hesap Ekle
@@ -632,7 +594,7 @@ export class App extends ReactiveComponent {
             class="btn-ghost"
             onClick={() => {
               this.recordActivity()
-              this.showSettingsModal = true
+              uiStore.showSettingsModal = true
             }}
           >
             Kasa & Yedek
@@ -642,7 +604,7 @@ export class App extends ReactiveComponent {
             class="btn-icon-sq"
             onClick={() => {
               this.recordActivity()
-              this.showSettingsModal = true
+              uiStore.showSettingsModal = true
             }}
           >
             ⚙
@@ -764,19 +726,27 @@ export class App extends ReactiveComponent {
               <div class="count-badge-text">{vaultStore.totalCount} Aktif</div>
             </div>
 
+            <div class="pagination-row" style={{ display: vaultStore.visibleCount > 8 ? 'flex' : 'none' }}>
+              <span>{vaultStore.pageStart}–{vaultStore.pageEnd} / {vaultStore.visibleCount} hesap</span>
+              <div class="pagination-actions">
+                <button class={`filter-chip ${vaultStore.page === 0 ? 'page-disabled' : ''}`} onClick={() => vaultStore.setPage(vaultStore.page - 1)}>← Önceki</button>
+                <button class={`filter-chip ${vaultStore.page + 1 >= vaultStore.pageCount ? 'page-disabled' : ''}`} onClick={() => vaultStore.setPage(vaultStore.page + 1)}>Sonraki →</button>
+              </div>
+            </div>
+
             {/* Cards List */}
             <div class="account-list-region">
               <div class="empty-box" style={{ display: vaultStore.liveAccounts.length === 0 ? 'flex' : 'none' }}>
                 <div class="empty-title">Henüz hesap yok</div>
                 <div class="empty-body">QR tarayarak, URI yapıştırarak veya manuel girerek hesap ekleyin.</div>
-                <button class="btn-primary-add" style={{ marginTop: '12px' }} onClick={() => { this.showAddModal = true }}>+ Hesap Ekle</button>
+                <button class="btn-primary-add" style={{ marginTop: '12px' }} onClick={() => { uiStore.showAddModal = true }}>+ Hesap Ekle</button>
               </div>
               <div class="cards-list" style={{ display: vaultStore.liveAccounts.length === 0 ? 'none' : 'flex' }}>
-                {vaultStore.liveAccounts.map((account) => (
+                {vaultStore.pageAccounts.map((account) => (
                   <AccountCard
                     key={account.id}
                     account={account}
-                    copied={this.copiedId === account.id}
+                    copied={uiStore.copiedId === account.id}
                     onToggleFavorite={(id: string) => this.toggleFavorite(id)}
                     onIncrementHotp={(id: string) => this.incrementHotp(id)}
                     onCopy={(id: string, code: string) => this.copyCode(code, id)}
@@ -797,15 +767,14 @@ export class App extends ReactiveComponent {
         </div>
 
         {/* Add Account Modal */}
-        {this.showAddModal ? (
-          <div class="overlay-backdrop">
+        <div class={`overlay-backdrop ${uiStore.showAddModal ? 'is-open' : ''}`}>
             <div class="modal-box">
               <div class="modal-header-row">
                 <span class="modal-heading">Hesap Ekle</span>
                 <button
                   class="btn-close-x"
                   onClick={() => {
-                    this.showAddModal = false
+                    uiStore.showAddModal = false
                   }}
                 >
                   ✕
@@ -814,34 +783,33 @@ export class App extends ReactiveComponent {
 
               <div class="modal-tabs-row">
                 <button
-                  class={`modal-tab-btn ${this.addTab === 'manual' ? 'active' : ''}`}
+                  class={`modal-tab-btn ${uiStore.addTab === 'manual' ? 'active' : ''}`}
                   onClick={() => {
-                    this.addTab = 'manual'
+                    uiStore.addTab = 'manual'
                   }}
                 >
                   Manuel
                 </button>
                 <button
-                  class={`modal-tab-btn ${this.addTab === 'uri' ? 'active' : ''}`}
+                  class={`modal-tab-btn ${uiStore.addTab === 'uri' ? 'active' : ''}`}
                   onClick={() => {
-                    this.addTab = 'uri'
+                    uiStore.addTab = 'uri'
                   }}
                 >
                   URI / Google Auth Aktarım
                 </button>
               </div>
 
-              {this.addError ? <div class="alert-error">{this.addError}</div> : null}
+              <div class="alert-error" style={{ display: uiStore.addError ? 'block' : 'none' }}>{uiStore.addError}</div>
 
-              {this.addTab === 'uri' ? (
-                <div class="modal-field-group">
+              <div class="modal-field-group" style={{ display: uiStore.addTab === 'uri' ? 'flex' : 'none' }}>
                   <span class="field-label">otpauth:// veya otpauth-migration:// URI</span>
                   <textarea
                     class="field-input textarea-tall"
                     placeholder="otpauth://totp/GitHub:user?secret=JBSWY3DPEHPK3PXP&#10;veya Google Authenticator migration URL yapıştırın"
-                    value={this.uriInput}
+                    value={uiStore.uriInput}
                     onInput={(e: InputEvent) => {
-                      this.uriInput = e.target.value
+                      uiStore.uriInput = e.target.value
                     }}
                   />
                   <div style={{ fontSize: '11px', color: '#8c909f', marginTop: '4px' }}>
@@ -850,18 +818,17 @@ export class App extends ReactiveComponent {
                   <button class="btn-ghost" style={{ marginTop: '8px' }} onClick={() => this.scanQr()}>
                     Kameradan QR Tara…
                   </button>
-                </div>
-              ) : (
-                <>
+              </div>
+              <div style={{ display: uiStore.addTab === 'manual' ? 'flex' : 'none', flexDirection: 'column', gap: '16px' }}>
                   <div class="modal-field-group">
                     <span class="field-label">Servis / Sağlayıcı</span>
                     <input
                       class="field-input"
                       type="text"
                       placeholder="Örn: GitHub, Google, AWS, Cloudflare"
-                      value={this.newIssuer}
+                      value={uiStore.newIssuer}
                       onInput={(e: InputEvent) => {
-                        this.newIssuer = e.target.value
+                        uiStore.newIssuer = e.target.value
                       }}
                     />
                   </div>
@@ -872,9 +839,9 @@ export class App extends ReactiveComponent {
                       class="field-input"
                       type="text"
                       placeholder="kullanici@alanadi.com"
-                      value={this.newAccount}
+                      value={uiStore.newAccount}
                       onInput={(e: InputEvent) => {
-                        this.newAccount = e.target.value
+                        uiStore.newAccount = e.target.value
                       }}
                     />
                   </div>
@@ -885,9 +852,9 @@ export class App extends ReactiveComponent {
                       class="field-input"
                       type="text"
                       placeholder="JBSWY3DPEHPK3PXP"
-                      value={this.newSecret}
+                      value={uiStore.newSecret}
                       onInput={(e: InputEvent) => {
-                        this.newSecret = e.target.value
+                        uiStore.newSecret = e.target.value
                       }}
                     />
                   </div>
@@ -897,17 +864,17 @@ export class App extends ReactiveComponent {
                       <span class="field-label">Tip</span>
                       <div style={{ display: 'flex', flexDirection: 'row', gap: '4px' }}>
                         <button
-                          class={`modal-tab-btn ${this.newType === 'totp' ? 'active' : ''}`}
+                          class={`modal-tab-btn ${uiStore.newType === 'totp' ? 'active' : ''}`}
                           onClick={() => {
-                            this.newType = 'totp'
+                            uiStore.newType = 'totp'
                           }}
                         >
                           TOTP (Zaman)
                         </button>
                         <button
-                          class={`modal-tab-btn ${this.newType === 'hotp' ? 'active' : ''}`}
+                          class={`modal-tab-btn ${uiStore.newType === 'hotp' ? 'active' : ''}`}
                           onClick={() => {
-                            this.newType = 'hotp'
+                            uiStore.newType = 'hotp'
                           }}
                         >
                           HOTP (Sayaç)
@@ -919,25 +886,25 @@ export class App extends ReactiveComponent {
                       <span class="field-label">Algoritma</span>
                       <div style={{ display: 'flex', flexDirection: 'row', gap: '4px' }}>
                         <button
-                          class={`modal-tab-btn ${this.newAlgorithm === 'SHA1' ? 'active' : ''}`}
+                          class={`modal-tab-btn ${uiStore.newAlgorithm === 'SHA1' ? 'active' : ''}`}
                           onClick={() => {
-                            this.newAlgorithm = 'SHA1'
+                            uiStore.newAlgorithm = 'SHA1'
                           }}
                         >
                           SHA1
                         </button>
                         <button
-                          class={`modal-tab-btn ${this.newAlgorithm === 'SHA256' ? 'active' : ''}`}
+                          class={`modal-tab-btn ${uiStore.newAlgorithm === 'SHA256' ? 'active' : ''}`}
                           onClick={() => {
-                            this.newAlgorithm = 'SHA256'
+                            uiStore.newAlgorithm = 'SHA256'
                           }}
                         >
                           SHA256
                         </button>
                         <button
-                          class={`modal-tab-btn ${this.newAlgorithm === 'SHA512' ? 'active' : ''}`}
+                          class={`modal-tab-btn ${uiStore.newAlgorithm === 'SHA512' ? 'active' : ''}`}
                           onClick={() => {
-                            this.newAlgorithm = 'SHA512'
+                            uiStore.newAlgorithm = 'SHA512'
                           }}
                         >
                           SHA512
@@ -951,17 +918,17 @@ export class App extends ReactiveComponent {
                       <span class="field-label">Kategori</span>
                       <div style={{ display: 'flex', flexDirection: 'row', gap: '4px' }}>
                         <button
-                          class={`modal-tab-btn ${this.newTag === 'kisisel' ? 'active' : ''}`}
+                          class={`modal-tab-btn ${uiStore.newTag === 'kisisel' ? 'active' : ''}`}
                           onClick={() => {
-                            this.newTag = 'kisisel'
+                            uiStore.newTag = 'kisisel'
                           }}
                         >
                           Kişisel
                         </button>
                         <button
-                          class={`modal-tab-btn ${this.newTag === 'is' ? 'active' : ''}`}
+                          class={`modal-tab-btn ${uiStore.newTag === 'is' ? 'active' : ''}`}
                           onClick={() => {
-                            this.newTag = 'is'
+                            uiStore.newTag = 'is'
                           }}
                         >
                           İş
@@ -969,40 +936,36 @@ export class App extends ReactiveComponent {
                       </div>
                     </div>
 
-                    {this.newType === 'totp' ? (
-                      <div class="modal-field-group" style={{ flex: 1 }}>
+                      <div class="modal-field-group" style={{ flex: 1, display: uiStore.newType === 'totp' ? 'flex' : 'none' }}>
                         <span class="field-label">Süre (sn)</span>
                         <input
                           class="field-input"
                           type="text"
-                          value={this.newPeriod}
+                          value={uiStore.newPeriod}
                           onInput={(e: InputEvent) => {
-                            this.newPeriod = e.target.value
+                            uiStore.newPeriod = e.target.value
                           }}
                         />
                       </div>
-                    ) : (
-                      <div class="modal-field-group" style={{ flex: 1 }}>
+                      <div class="modal-field-group" style={{ flex: 1, display: uiStore.newType === 'hotp' ? 'flex' : 'none' }}>
                         <span class="field-label">Başlangıç Sayacı</span>
                         <input
                           class="field-input"
                           type="text"
-                          value={this.newCounter}
+                          value={uiStore.newCounter}
                           onInput={(e: InputEvent) => {
-                            this.newCounter = e.target.value
+                            uiStore.newCounter = e.target.value
                           }}
                         />
                       </div>
-                    )}
                   </div>
-                </>
-              )}
+              </div>
 
               <div class="modal-actions-row">
                 <button
                   class="btn-ghost"
                   onClick={() => {
-                    this.showAddModal = false
+                    uiStore.showAddModal = false
                   }}
                 >
                   İptal
@@ -1013,18 +976,16 @@ export class App extends ReactiveComponent {
               </div>
             </div>
           </div>
-        ) : null}
 
         {/* QR Code Sharing Modal */}
-        {this.showQrModal ? (
-          <div class="overlay-backdrop">
+        <div class={`overlay-backdrop ${uiStore.showQrModal ? 'is-open' : ''}`}>
             <div class="modal-box">
               <div class="modal-header-row">
-                <span class="modal-heading">QR / URI Paylaşımı — {this.selectedQrIssuer}</span>
+                <span class="modal-heading">QR / URI Paylaşımı — {uiStore.selectedQrIssuer}</span>
                 <button
                   class="btn-close-x"
                   onClick={() => {
-                    this.showQrModal = false
+                    uiStore.showQrModal = false
                   }}
                 >
                   ✕
@@ -1035,7 +996,7 @@ export class App extends ReactiveComponent {
                 <span class="field-label">Standart otpauth URI</span>
                 <textarea
                   class="field-input textarea-mono"
-                  value={this.selectedQrUri}
+                  value={uiStore.selectedQrUri}
                 />
               </div>
 
@@ -1043,7 +1004,7 @@ export class App extends ReactiveComponent {
                 <button
                   class="btn-primary-add"
                   onClick={() => {
-                    safeCopy(this.selectedQrUri)
+                    safeCopy(uiStore.selectedQrUri)
                     this.showToast('otpauth URI panoya kopyalandı')
                   }}
                 >
@@ -1052,7 +1013,7 @@ export class App extends ReactiveComponent {
                 <button
                   class="btn-ghost"
                   onClick={() => {
-                    this.showQrModal = false
+                    uiStore.showQrModal = false
                   }}
                 >
                   Kapat
@@ -1060,18 +1021,16 @@ export class App extends ReactiveComponent {
               </div>
             </div>
           </div>
-        ) : null}
 
         {/* Verify Modal */}
-        {this.verifyAccountId ? (
-          <div class="overlay-backdrop">
+        <div class={`overlay-backdrop ${uiStore.verifyAccountId ? 'is-open' : ''}`}>
             <div class="modal-box">
               <div class="modal-header-row">
                 <span class="modal-heading">Kod Doğrula — {verifyAcc?.issuer}</span>
                 <button
                   class="btn-close-x"
                   onClick={() => {
-                    this.verifyAccountId = ''
+                    uiStore.verifyAccountId = ''
                   }}
                 >
                   ✕
@@ -1084,9 +1043,9 @@ export class App extends ReactiveComponent {
                   class="field-input"
                   type="text"
                   placeholder="123456"
-                  value={this.verifyInput}
+                  value={uiStore.verifyInput}
                   onInput={(e: InputEvent) => {
-                    this.verifyInput = e.target.value
+                    uiStore.verifyInput = e.target.value
                   }}
                   onKeyDown={(e: KeyEvent) => {
                     if (e.keyCode === 13) this.checkVerify()
@@ -1094,18 +1053,14 @@ export class App extends ReactiveComponent {
                 />
               </div>
 
-              {this.verifyResult === 'success' ? (
-                <div class="alert-success">✓ Kod geçerli! Doğrulama başarılı.</div>
-              ) : null}
-              {this.verifyResult === 'error' ? (
-                <div class="alert-error">✕ Kod geçersiz veya süresi dolmuş.</div>
-              ) : null}
+              <div class="alert-success" style={{ display: uiStore.verifyResult === 'success' ? 'block' : 'none' }}>✓ Kod geçerli! Doğrulama başarılı.</div>
+              <div class="alert-error" style={{ display: uiStore.verifyResult === 'error' ? 'block' : 'none' }}>✕ Kod geçersiz veya süresi dolmuş.</div>
 
               <div class="modal-actions-row">
                 <button
                   class="btn-ghost"
                   onClick={() => {
-                    this.verifyAccountId = ''
+                    uiStore.verifyAccountId = ''
                   }}
                 >
                   Kapat
@@ -1116,30 +1071,24 @@ export class App extends ReactiveComponent {
               </div>
             </div>
           </div>
-        ) : null}
 
         {/* Settings & Backup Modal */}
-        {this.showSettingsModal ? (
-          <div class="overlay-backdrop">
+        <div class={`overlay-backdrop ${uiStore.showSettingsModal ? 'is-open' : ''}`}>
             <div class="modal-box" style={{ maxHeight: '85vh', overflowY: 'auto' }}>
               <div class="modal-header-row">
                 <span class="modal-heading">Kasa & Ayarlar</span>
                 <button
                   class="btn-close-x"
                   onClick={() => {
-                    this.showSettingsModal = false
+                    uiStore.showSettingsModal = false
                   }}
                 >
                   ✕
                 </button>
               </div>
 
-              {this.settingsMessage ? (
-                <div class="alert-success">{this.settingsMessage}</div>
-              ) : null}
-              {this.settingsError ? (
-                <div class="alert-error">{this.settingsError}</div>
-              ) : null}
+              <div class="alert-success" style={{ display: uiStore.settingsMessage ? 'block' : 'none' }}>{uiStore.settingsMessage}</div>
+              <div class="alert-error" style={{ display: uiStore.settingsError ? 'block' : 'none' }}>{uiStore.settingsError}</div>
 
               <div class="modal-field-group">
                 <span class="field-label">Aktif Kasa Konumu</span>
@@ -1154,9 +1103,9 @@ export class App extends ReactiveComponent {
                   class="field-input"
                   type="password"
                   placeholder="Mevcut parola"
-                  value={this.currentPass}
+                  value={uiStore.currentPass}
                   onInput={(e: InputEvent) => {
-                    this.currentPass = e.target.value
+                    uiStore.currentPass = e.target.value
                   }}
                 />
                 <input
@@ -1164,9 +1113,9 @@ export class App extends ReactiveComponent {
                   style={{ marginTop: '4px' }}
                   type="password"
                   placeholder="Yeni parola"
-                  value={this.nextPass}
+                  value={uiStore.nextPass}
                   onInput={(e: InputEvent) => {
-                    this.nextPass = e.target.value
+                    uiStore.nextPass = e.target.value
                   }}
                 />
                 <input
@@ -1174,9 +1123,9 @@ export class App extends ReactiveComponent {
                   style={{ marginTop: '4px' }}
                   type="password"
                   placeholder="Yeni parolayı onayla"
-                  value={this.confirmPass}
+                  value={uiStore.confirmPass}
                   onInput={(e: InputEvent) => {
-                    this.confirmPass = e.target.value
+                    uiStore.confirmPass = e.target.value
                   }}
                 />
                 <button
@@ -1204,9 +1153,9 @@ export class App extends ReactiveComponent {
                   class="field-input"
                   type="password"
                   placeholder="Yedek master parolası"
-                  value={this.importJsonInput}
+                  value={uiStore.importJsonInput}
                   onInput={(e: InputEvent) => {
-                    this.importJsonInput = e.target.value
+                    uiStore.importJsonInput = e.target.value
                   }}
                 />
                 <button
@@ -1229,7 +1178,7 @@ export class App extends ReactiveComponent {
                 <button
                   class="btn-primary-add"
                   onClick={() => {
-                    this.showSettingsModal = false
+                    uiStore.showSettingsModal = false
                   }}
                 >
                   Tamam
@@ -1237,15 +1186,12 @@ export class App extends ReactiveComponent {
               </div>
             </div>
           </div>
-        ) : null}
 
         {/* Floating Toast Notification */}
-        {this.toastMessage ? (
-          <div class="toast-bar">
+        <div class={`toast-bar ${uiStore.toastMessage ? 'is-open' : ''}`}>
             <span class="toast-check">✓</span>
-            <span>{this.toastMessage}</span>
-          </div>
-        ) : null}
+            <span>{uiStore.toastMessage}</span>
+        </div>
       </div>
         </div>
       </div>

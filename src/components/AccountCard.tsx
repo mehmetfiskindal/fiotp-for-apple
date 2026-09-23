@@ -1,4 +1,4 @@
-import type { LiveAccount } from '../stores/VaultStore'
+import { vaultStore, type LiveAccount } from '../stores/VaultStore'
 import { Component, type GeaElement } from '@geastack/core'
 
 export interface AccountCardProps {
@@ -17,6 +17,9 @@ export default class AccountCard extends Component<GeaElement, AccountCardProps>
   template(props: AccountCardProps) {
     const { account: acc, copied, onToggleFavorite, onIncrementHotp, onCopy, onShowQr, onVerify, onDelete } = props
     const initials = (acc.issuer || '??').slice(0, 2).toUpperCase()
+    const remainingSeconds = acc.type === 'totp'
+      ? acc.period - (vaultStore.clockSeconds % acc.period)
+      : 0
 
     return (
     <div class="totp-card" key={acc.id}>
@@ -38,8 +41,8 @@ export default class AccountCard extends Component<GeaElement, AccountCardProps>
       <div class="card-right">
         {acc.type === 'totp' ? (
           <div class="timer-ring-wrap">
-            <div class={`timer-ring-bg ${acc.remainingSeconds <= 5 ? 'danger' : acc.remainingSeconds <= 10 ? 'warning' : ''}`}>
-              <div class="timer-ring-inner">{acc.remainingSeconds}</div>
+            <div class={`timer-ring-bg ${remainingSeconds <= 5 ? 'danger' : remainingSeconds <= 10 ? 'warning' : ''}`}>
+              <div class="timer-ring-inner">{remainingSeconds}</div>
             </div>
           </div>
         ) : (
@@ -50,7 +53,7 @@ export default class AccountCard extends Component<GeaElement, AccountCardProps>
           class={`code-box ${copied ? 'copied' : ''}`}
           onClick={() => onCopy(acc.id, acc.liveCode)}
         >
-          <span class={`code-text ${acc.type === 'totp' && acc.remainingSeconds <= 5 ? 'urgent' : ''}`}>
+          <span class="code-text">
             {copied ? 'Kopyalandı ✓' : acc.liveCode}
           </span>
           <span class="copy-icon">⧉</span>
