@@ -28,6 +28,19 @@ const replacements = [
     `/usr/bin/open -a Simulator --args -CurrentDeviceUDID "$udid"`,
     `/usr/bin/open -a "Device Hub" >/dev/null 2>&1 || true`,
   ],
+  [
+    `  xcrun devicectl --timeout "\${GEA_IOS_DEVICECTL_TIMEOUT:-60}" device install app --device "$IOS_DEVICE_ID" "$APP_PRODUCT"
+  xcrun devicectl --timeout "\${GEA_IOS_DEVICECTL_TIMEOUT:-60}" device process launch --terminate-existing --activate --device "$IOS_DEVICE_ID" "$BUNDLE_ID"`,
+    `  if ! xcrun devicectl --timeout "\${GEA_IOS_DEVICECTL_TIMEOUT:-60}" device install app --device "$IOS_DEVICE_ID" "$APP_PRODUCT"; then
+    echo "" >&2
+    echo "⚠️  Cihaza yükleme başarısız oldu (CoreDevice 4016: Cihaz kilitli veya tünel erişilemez)." >&2
+    echo "   Lütfen iPhone ekran kilidini açın (parolayı girin), varsa 'Bu Bilgisayara Güven' onayını verin ve cihazın uyanık olduğundan emin olun." >&2
+    echo "   (Uygulama başarıyla derlendi: $APP_PRODUCT)" >&2
+    echo "   Sadece derlemek ve yükleme adımını atlamak için: GEA_IOS_SKIP_LAUNCH=1" >&2
+    exit 1
+  fi
+  xcrun devicectl --timeout "\${GEA_IOS_DEVICECTL_TIMEOUT:-60}" device process launch --terminate-existing --activate --device "$IOS_DEVICE_ID" "$BUNDLE_ID" || true`,
+  ],
 ]
 
 for (const [from, to] of replacements) {
@@ -54,6 +67,15 @@ if (!projectGenerator.includes("'UniformTypeIdentifiers.framework'")) {
   if (!projectGenerator.includes(frameworkAnchor)) throw new Error('Unsupported iOS framework list in @geastack/apple generator')
   projectGenerator = projectGenerator.replace(frameworkAnchor, frameworkAddition)
   writeFileSync(projectGeneratorPath, projectGenerator)
+}
+
+const warningFlagsAnchor = '\t\t\t\tCLANG_CXX_LANGUAGE_STANDARD = "c++20";'
+const warningFlagsAddition = `${warningFlagsAnchor}\n\t\t\t\tWARNING_CFLAGS = ("-Wno-unused-value", "-Wno-parentheses-equality", "-Wno-shorten-64-to-32");`
+if (!projectGenerator.includes('WARNING_CFLAGS =')) {
+  if (projectGenerator.includes(warningFlagsAnchor)) {
+    projectGenerator = projectGenerator.replace(warningFlagsAnchor, warningFlagsAddition)
+    writeFileSync(projectGeneratorPath, projectGenerator)
+  }
 }
 
 console.log('Patched GeaStack iOS build paths to resolve app-installed packages')
@@ -96,3 +118,11 @@ if (!plistTemplate.includes('<key>UIApplicationSceneManifest</key>')) {
   plistTemplate = plistTemplate.replace(plistAnchor, `${sceneManifest}\n${plistAnchor}`)
   writeFileSync(plistTemplatePath, plistTemplate)
 }
+
+const dummyCameraDesc = '<string>Gea native examples use the camera to demonstrate AVFoundation preview layers from TypeScript.</string>'
+const fiotpCameraDesc = '<string>FiOTP, iki faktörlü kimlik doğrulama hesaplarını QR kodundan içe aktarmak için kamerayı kullanır.</string>'
+if (plistTemplate.includes(dummyCameraDesc)) {
+  plistTemplate = plistTemplate.replace(dummyCameraDesc, fiotpCameraDesc)
+  writeFileSync(plistTemplatePath, plistTemplate)
+}
+

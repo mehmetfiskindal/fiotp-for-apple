@@ -9,8 +9,9 @@
     "test": "node --experimental-strip-types tests/otp.test.ts && sh scripts/test-native.sh",
     "dev": "gea dev",
     "build": "gea build --target web",
-    "build:macos": "gea build --target macos && plutil -replace NSCameraUsageDescription -string 'FiOTP QR kodlar\u0131n\u0131 taramak i\u00e7in kameray\u0131 kullan\u0131r.' dist/macos/fiotp-gea/FiOTP.app/Contents/Info.plist && codesign --force --deep --sign - dist/macos/fiotp-gea/FiOTP.app",
+    "build:macos": "gea build --target macos",
     "build:ios": "node_modules/@geastack/apple/targets/ios/build-ios.sh fiotp-gea simulator && node scripts/ios-postbuild.mjs",
+    "build:ios:device": "node_modules/@geastack/apple/targets/ios/build-ios.sh fiotp-gea device && node scripts/ios-postbuild.mjs",
     "build:android": "cd android && ./gradlew assembleDebug",
     "test:android": "cd android && ./gradlew testDebugUnitTest",
     "build:linux": "bash scripts/build-linux.sh"

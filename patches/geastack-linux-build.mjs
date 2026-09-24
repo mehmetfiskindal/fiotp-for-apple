@@ -1,6 +1,10 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 
 const path = 'node_modules/@geastack/linux/targets/raspberry-pi-os/build-raspberry-pi-os.sh'
+if (!existsSync(path)) {
+  console.log('Skipping GeaStack Linux build patch: @geastack/linux target script not found')
+  process.exit(0)
+}
 const original = readFileSync(path, 'utf8')
 let source = original
 
