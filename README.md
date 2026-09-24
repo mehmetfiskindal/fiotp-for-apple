@@ -66,7 +66,7 @@ On macOS the default vault is `~/Library/Application Support/FiOTP Gea/kasa.json
 | --- | --- |
 | `src/App.tsx`, `src/stores/` | Interface and application state |
 | `src/crypto/`, `src/services/` | OTP generation and encrypted vault operations |
-| `native/`, `scripts/fiotp-host-plugin.mjs` | Apple, Linux, and Windows host integrations |
+| `native/` | Apple, Linux, and Windows host integrations |
 | `windows.json` | Windows native window configuration |
 | `android/app/src/main/java/` | Native Android Compose UI, OTP, vault encryption, SAF and camera integration |
 | `patches/` | GeaStack macOS secure password field patch |
