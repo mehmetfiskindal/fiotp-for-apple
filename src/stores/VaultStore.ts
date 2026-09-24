@@ -13,7 +13,11 @@ class VaultStore extends Store {
   liveAccounts: LiveAccount[] = []
   clockSeconds = 0
   page = 0
-  pageSize = 25
+  pageSize = 8
+  pageCount = 1
+  pageStart = 0
+  pageEnd = 0
+  visibleCount = 0
   private lastLiveEpoch = 0
   totalCount = 0
   favoriteCount = 0
@@ -27,10 +31,7 @@ class VaultStore extends Store {
   error = ''
 
   get unlocked() { return this.phase === 'unlocked' }
-  get visibleCount() { return this.visibleAccounts.length }
-  get pageCount() { return Math.max(1, Math.ceil(this.visibleCount / this.pageSize)) }
-  get pageStart() { return this.visibleCount === 0 ? 0 : this.page * this.pageSize + 1 }
-  get pageEnd() { return Math.min((this.page + 1) * this.pageSize, this.visibleCount) }
+
   rebuildView() {
     const q = this.search.trim().toLowerCase()
     const visible: Account[] = []
@@ -51,29 +52,58 @@ class VaultStore extends Store {
       visible.push(account)
     }
     this.visibleAccounts = visible
-    this.page = Math.max(0, Math.min(this.page, this.pageCount - 1))
     this.totalCount = this.accounts.length
     this.favoriteCount = favorites
     this.workCount = work
     this.personalCount = personal
     this.hotpCount = hotp
+    this.updatePagination()
+  }
+
+  updatePagination() {
+    this.visibleCount = this.visibleAccounts.length
+    this.pageCount = Math.max(1, Math.ceil(this.visibleCount / this.pageSize))
+    if (this.page >= this.pageCount) {
+      this.page = Math.max(0, this.pageCount - 1)
+    }
+    if (this.page < 0) {
+      this.page = 0
+    }
+    const offset = this.page * this.pageSize
+    this.pageStart = this.visibleCount === 0 ? 0 : offset + 1
+    this.pageEnd = Math.min(offset + this.pageSize, this.visibleCount)
     this.rebuildLive(Math.floor(Date.now() / 1000))
+  }
+
+  prevPage() {
+    if (this.page > 0) {
+      this.page--
+      this.updatePagination()
+    }
+  }
+
+  nextPage() {
+    if (this.page + 1 < this.pageCount) {
+      this.page++
+      this.updatePagination()
+    }
+  }
+
+  setPage(value: number) {
+    const next = Math.max(0, Math.min(Math.trunc(value), this.pageCount - 1))
+    if (next === this.page && this.liveAccounts.length > 0) return
+    this.page = next
+    this.updatePagination()
   }
 
   tick(epochSeconds: number) {
     if (!this.unlocked) return
-    // Keep the account array stable while scrolling. Only the small countdown
-    // component observes this scalar, and an expired TOTP updates its code in
-    // the existing account object rather than remounting the whole list.
     this.clockSeconds = epochSeconds
-    for (let index = 0; index < this.liveAccounts.length; index++) {
-      const account = this.liveAccounts[index]
+    for (const account of this.liveAccounts) {
       if (account.type === 'totp' &&
           Math.floor(epochSeconds / account.period) !== Math.floor(this.lastLiveEpoch / account.period)) {
-        const generated = generateTotp(account.secret, account.period, account.digits,
-          account.algorithm, epochSeconds * 1000)
-        this.liveAccounts[index].liveCode = generated.formattedCode
-        this.liveAccounts[index].remainingSeconds = generated.remainingSeconds
+        this.rebuildLive(epochSeconds)
+        return
       }
     }
     this.lastLiveEpoch = epochSeconds
@@ -82,7 +112,9 @@ class VaultStore extends Store {
   private rebuildLive(epochSeconds: number) {
     this.clockSeconds = epochSeconds
     const live: LiveAccount[] = []
-    const pageAccounts = this.visibleAccounts.slice(this.page * this.pageSize, (this.page + 1) * this.pageSize)
+    const start = this.page * this.pageSize
+    const end = start + this.pageSize
+    const pageAccounts = this.visibleAccounts.slice(start, end)
     for (const account of pageAccounts) {
       if (account.type === 'hotp') {
         live.push({
@@ -96,8 +128,11 @@ class VaultStore extends Store {
       } else {
         const generated = generateTotp(account.secret, account.period, account.digits,
           account.algorithm, epochSeconds * 1000)
-        live.push({ ...account, liveCode: generated.formattedCode,
-          remainingSeconds: generated.remainingSeconds })
+        live.push({
+          ...account,
+          liveCode: generated.formattedCode,
+          remainingSeconds: generated.remainingSeconds,
+        })
       }
     }
     this.lastLiveEpoch = epochSeconds
@@ -106,10 +141,6 @@ class VaultStore extends Store {
 
   setSearch(value: string) { this.search = value; this.page = 0; this.rebuildView() }
   setCategory(value: CategoryFilter) { this.category = value; this.page = 0; this.rebuildView() }
-  setPage(value: number) {
-    this.page = Math.max(0, Math.min(Math.trunc(value), this.pageCount - 1))
-    this.rebuildLive(Math.floor(Date.now() / 1000))
-  }
 
   loadStatus(): VaultStatus {
     const status = vaultService.status()

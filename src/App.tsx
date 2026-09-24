@@ -686,24 +686,28 @@ export class App extends ReactiveComponent {
             </div>
 
             <div class="pagination-row" aria-label="Hesap sayfaları">
-              <span>{vaultStore.pageStart}–{vaultStore.pageEnd} / {vaultStore.visibleCount} hesap</span>
+              <span class="pagination-info">
+                {`${vaultStore.pageStart}–${vaultStore.pageEnd} / ${vaultStore.visibleCount} hesap`}
+              </span>
               <div class="pagination-actions">
                 <button
-                  class="btn-primary-add pagination-button"
+                  class={`pagination-btn ${vaultStore.page === 0 ? 'disabled' : ''}`}
                   onClick={() => {
-                    if (vaultStore.page > 0) vaultStore.setPage(vaultStore.page - 1)
+                    vaultStore.prevPage()
                   }}
                 >
-                  <span>Önceki</span>
+                  <span>← Önceki</span>
                 </button>
-                <span class="pagination-page">{vaultStore.page + 1} / {vaultStore.pageCount}</span>
+                <span class="pagination-page">
+                  {`${vaultStore.page + 1} / ${vaultStore.pageCount}`}
+                </span>
                 <button
-                  class="btn-primary-add pagination-button"
+                  class={`pagination-btn ${vaultStore.page + 1 >= vaultStore.pageCount ? 'disabled' : ''}`}
                   onClick={() => {
-                    if (vaultStore.page + 1 < vaultStore.pageCount) vaultStore.setPage(vaultStore.page + 1)
+                    vaultStore.nextPage()
                   }}
                 >
-                  <span>Sonraki</span>
+                  <span>Sonraki →</span>
                 </button>
               </div>
             </div>

@@ -304,13 +304,61 @@ private fun HomeScreen(
         androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 10.dp)) {
             items(listOf("Tümü", "Favoriler", "İş", "Kişisel")) { item -> FilterChip(selected = category == item, onClick = { category = item }, label = { Text(item) }) }
         }
+        val pageSize = 8
+        val pageCount = maxOf(1, kotlin.math.ceil(shown.size.toDouble() / pageSize).toInt())
+        var page by remember(shown) { mutableStateOf(0) }
+        val clampedPage = page.coerceIn(0, pageCount - 1)
+        val pagedAccounts = shown.drop(clampedPage * pageSize).take(pageSize)
+        val pageStart = if (shown.isEmpty()) 0 else clampedPage * pageSize + 1
+        val pageEnd = minOf((clampedPage + 1) * pageSize, shown.size)
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "$pageStart–$pageEnd / ${shown.size} hesap",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = { if (clampedPage > 0) page = clampedPage - 1 },
+                    enabled = clampedPage > 0,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Text("← Önceki", fontSize = 11.sp)
+                }
+                Text(
+                    "${clampedPage + 1} / $pageCount",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                OutlinedButton(
+                    onClick = { if (clampedPage + 1 < pageCount) page = clampedPage + 1 },
+                    enabled = clampedPage + 1 < pageCount,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Text("Sonraki →", fontSize = 11.sp)
+                }
+            }
+        }
+
         if (shown.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text(if (activity.accounts.isEmpty()) "Henüz hesap yok. Bir URI girin veya QR kodu tarayın." else "Aramanızla eşleşen hesap yok.", color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
             }
         } else {
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 12.dp)) {
-                items(shown, key = { it.id }) { account ->
+                items(pagedAccounts, key = { it.id }) { account ->
                     val code = remember(account.secret, account.counter, now / (account.period.coerceAtLeast(1) * 1000L)) { OtpEngine.code(account, now / 1000) }
                     AccountCard(account, code, now,
                         onCopy = {
