@@ -1,4 +1,4 @@
-export type ApplePlatform = 'macos' | 'ios' | 'web'
+export type Platform = 'macos' | 'ios' | 'linux' | 'web'
 
 declare function fiotpHostInvoke(method: string, payload: string): string
 
@@ -17,9 +17,9 @@ type UiFailure = (error: Error) => void
 
 export class PlatformHost {
   readonly available = hasNativeHost()
-  readonly platform: ApplePlatform = this.readPlatform()
+  readonly platform: Platform = this.readPlatform()
 
-  private readPlatform(): ApplePlatform {
+  private readPlatform(): Platform {
     if (!hasNativeHost()) return 'web'
     try {
       const result = parse(fiotpHostInvoke('platform.info', '{}'))

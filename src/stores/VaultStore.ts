@@ -12,6 +12,8 @@ class VaultStore extends Store {
   visibleAccounts: Account[] = []
   liveAccounts: LiveAccount[] = []
   clockSeconds = 0
+  page = 0
+  pageSize = 25
   private lastLiveEpoch = 0
   totalCount = 0
   favoriteCount = 0
@@ -25,6 +27,10 @@ class VaultStore extends Store {
   error = ''
 
   get unlocked() { return this.phase === 'unlocked' }
+  get visibleCount() { return this.visibleAccounts.length }
+  get pageCount() { return Math.max(1, Math.ceil(this.visibleCount / this.pageSize)) }
+  get pageStart() { return this.visibleCount === 0 ? 0 : this.page * this.pageSize + 1 }
+  get pageEnd() { return Math.min((this.page + 1) * this.pageSize, this.visibleCount) }
   rebuildView() {
     const q = this.search.trim().toLowerCase()
     const visible: Account[] = []
@@ -45,6 +51,7 @@ class VaultStore extends Store {
       visible.push(account)
     }
     this.visibleAccounts = visible
+    this.page = Math.max(0, Math.min(this.page, this.pageCount - 1))
     this.totalCount = this.accounts.length
     this.favoriteCount = favorites
     this.workCount = work
@@ -59,8 +66,8 @@ class VaultStore extends Store {
     // component observes this scalar, and an expired TOTP updates its code in
     // the existing account object rather than remounting the whole list.
     this.clockSeconds = epochSeconds
-    for (let index = 0; index < this.visibleAccounts.length; index++) {
-      const account = this.visibleAccounts[index]
+    for (let index = 0; index < this.liveAccounts.length; index++) {
+      const account = this.liveAccounts[index]
       if (account.type === 'totp' &&
           Math.floor(epochSeconds / account.period) !== Math.floor(this.lastLiveEpoch / account.period)) {
         const generated = generateTotp(account.secret, account.period, account.digits,
@@ -75,7 +82,8 @@ class VaultStore extends Store {
   private rebuildLive(epochSeconds: number) {
     this.clockSeconds = epochSeconds
     const live: LiveAccount[] = []
-    for (const account of this.visibleAccounts) {
+    const pageAccounts = this.visibleAccounts.slice(this.page * this.pageSize, (this.page + 1) * this.pageSize)
+    for (const account of pageAccounts) {
       if (account.type === 'hotp') {
         live.push({
           ...account,
@@ -96,8 +104,12 @@ class VaultStore extends Store {
     this.liveAccounts = live
   }
 
-  setSearch(value: string) { this.search = value; this.rebuildView() }
-  setCategory(value: CategoryFilter) { this.category = value; this.rebuildView() }
+  setSearch(value: string) { this.search = value; this.page = 0; this.rebuildView() }
+  setCategory(value: CategoryFilter) { this.category = value; this.page = 0; this.rebuildView() }
+  setPage(value: number) {
+    this.page = Math.max(0, Math.min(Math.trunc(value), this.pageCount - 1))
+    this.rebuildLive(Math.floor(Date.now() / 1000))
+  }
 
   loadStatus(): VaultStatus {
     const status = vaultService.status()
@@ -160,6 +172,7 @@ class VaultStore extends Store {
     this.accounts = []
     this.search = ''
     this.category = 'all'
+    this.page = 0
     this.rebuildView()
     this.phase = 'locked'
     this.error = ''

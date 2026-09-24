@@ -1,0 +1,6 @@
+Symbola
+Copyright (C) 2007–2015 George Douros
+
+The font is free for any use; it may be opened, edited, modified, regenerated, packaged, and redistributed.
+
+Upstream source: http://users.teilar.gr/~g1951d/

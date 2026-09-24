@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .gea/build/
+.gea-linux/
 .env
 *.p12
 *.cer
@@ -14,3 +15,8 @@ dist/
 kasa.json
 kasa.json.bak
 .notarytool/
+
+# Native Android build output
+android/.gradle/
+android/app/build/
+android/local.properties

@@ -2,13 +2,14 @@
 
 FiOTP is an offline TOTP and HOTP authenticator for macOS. It stores accounts in a local vault encrypted with AES-256-GCM and generates verification codes on-device.
 
-The application is built with [GeaStack](https://www.npmjs.com/package/@geastack/cli) using TypeScript and TSX. GeaStack compiles the interface from `src/index.tsx`. The native bridge in `native/fiotp_host.mm`, together with `scripts/fiotp-host-plugin.mjs`, provides macOS file, cryptography, camera, and system integration. The project currently enables macOS and a web-based interface preview.
+The application is built with [GeaStack](https://www.npmjs.com/package/@geastack/cli) using TypeScript and TSX. GeaStack compiles the interface from `src/index.tsx`. The native bridge in `native/fiotp_host.mm`, together with `scripts/fiotp-host-plugin.mjs`, provides macOS file, cryptography, camera, and system integration. The project also includes a separate native Android application under `android/`, implemented in Kotlin and Jetpack Compose. It shares this repository and the FiOTP vault format; it does not use the GeaStack Android WebView target. The web target remains an interface preview.
 
 ## Requirements
 
 - macOS
 - Node.js and npm
-- Xcode Command Line Tools (`xcode-select --install`)
+- Xcode Command Line Tools (`xcode-select --install`) for Apple builds
+- JDK 17 or newer and Android SDK Platform 36 for Android builds
 
 ## Installation
 
@@ -28,6 +29,8 @@ npm run check        # Run the TypeScript check
 npm test             # Run OTP and native vault tests
 npx gea inspect --json
 npm run build:macos  # Build the macOS application
+npm run build:android # Build the Android debug APK
+npm run test:android  # Run Kotlin unit tests
 ```
 
 The macOS application is generated at `dist/macos/fiotp-gea/FiOTP.app` and can be launched with:
@@ -35,6 +38,8 @@ The macOS application is generated at `dist/macos/fiotp-gea/FiOTP.app` and can b
 ```sh
 open dist/macos/fiotp-gea/FiOTP.app
 ```
+
+The Android APK is generated at `android/app/build/outputs/apk/debug/app-debug.apk` and uses the package id `com.fiskindal.fiotp`. Android supports API 23 and newer. Its first build is debug-signed. The Android UI, OTP engine, vault cryptography, file selection, and QR camera flow are implemented in Kotlin; the Apple and web targets continue to use the existing TypeScript/GeaStack application.
 
 The web target is intended for interface development and preview. It does not open or persist production vaults. Camera access and production vault workflows are available in the macOS application.
 
@@ -56,7 +61,8 @@ By default, the vault is stored at `~/Library/Application Support/FiOTP Gea/kasa
 | --- | --- |
 | `src/App.tsx`, `src/stores/` | Interface and application state |
 | `src/crypto/`, `src/services/` | OTP generation and encrypted vault operations |
-| `native/`, `scripts/fiotp-host-plugin.mjs` | macOS host integration |
+| `native/`, `scripts/fiotp-host-plugin.mjs` | Apple host integration |
+| `android/app/src/main/java/` | Native Android Compose UI, OTP, vault encryption, SAF and camera integration |
 | `patches/` | GeaStack macOS secure password field patch |
 | `tests/`, `native/fiotp_host_test.mm` | OTP and native vault tests |
 

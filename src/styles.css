@@ -32,6 +32,66 @@ html, body {
   font-family: 'Inter';
 }
 
+.linux-layout .title-bar {
+  padding-left: 20px;
+  gap: 16px;
+}
+
+.linux-layout .vault-pill {
+  min-width: 0;
+  max-width: 52%;
+}
+
+.linux-layout .vault-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linux-layout .toolbar {
+  gap: 10px;
+}
+
+.linux-layout .search-box {
+  flex: 1;
+  min-width: 220px;
+  max-width: 480px;
+}
+
+.linux-layout .toolbar > button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.linux-layout .sidebar {
+  width: 228px;
+  min-width: 228px;
+}
+
+.linux-layout .main-view {
+  min-width: 0;
+}
+
+.linux-layout .totp-card {
+  flex-direction: row;
+  align-items: center;
+  gap: 20px;
+  padding: 16px 18px;
+}
+
+.linux-layout .card-left {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.linux-layout .card-right {
+  width: auto;
+  flex: 0;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
 .ios-layout .title-bar {
   height: 88px;
   min-height: 88px;
