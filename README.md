@@ -1,14 +1,15 @@
 # FiOTP
 
-FiOTP is an offline TOTP and HOTP authenticator for macOS. It stores accounts in a local vault encrypted with AES-256-GCM and generates verification codes on-device.
+FiOTP is an offline TOTP and HOTP authenticator for macOS, iOS, Linux, Windows, and Android. It stores accounts in a local vault encrypted with AES-256-GCM and generates verification codes on-device.
 
-The application is built with [GeaStack](https://www.npmjs.com/package/@geastack/cli) using TypeScript and TSX. GeaStack compiles the interface from `src/index.tsx`. The native bridge in `native/fiotp_host.mm`, together with `scripts/fiotp-host-plugin.mjs`, provides macOS file, cryptography, camera, and system integration. The project also includes a separate native Android application under `android/`, implemented in Kotlin and Jetpack Compose. It shares this repository and the FiOTP vault format; it does not use the GeaStack Android WebView target. The web target remains an interface preview.
+The application is built with [GeaStack](https://www.npmjs.com/package/@geastack/cli) using TypeScript and TSX. GeaStack compiles the interface from `src/index.tsx`. Platform host bridges provide native file, cryptography, clipboard, and camera integration where supported. The project also includes a separate native Android application under `android/`, implemented in Kotlin and Jetpack Compose. It shares this repository and the FiOTP vault format; it does not use the GeaStack Android WebView target. The web target remains an interface preview.
 
-## Requirements
+## Platform build requirements
 
-- macOS
 - Node.js and npm
 - Xcode Command Line Tools (`xcode-select --install`) for Apple builds
+- Raspberry Pi OS Bookworm or newer and the native dependencies listed in [LINUX.md](LINUX.md) for Linux builds
+- Windows 10/11, Visual Studio Build Tools with the MSVC C++ toolset and Windows SDK, plus LLVM `clang-cl` and `lld-link` for Windows builds
 - JDK 17 or newer and Android SDK Platform 36 for Android builds
 
 ## Installation
@@ -29,6 +30,8 @@ npm run check        # Run the TypeScript check
 npm test             # Run OTP and native vault tests
 npx gea inspect --json
 npm run build:macos  # Build the macOS application
+npm run build:windows  # Build the Windows application
+npm run run:windows   # Build and launch the Windows application
 npm run build:android # Build the Android debug APK
 npm run test:android  # Run Kotlin unit tests
 ```
@@ -41,7 +44,9 @@ open dist/macos/fiotp-gea/FiOTP.app
 
 The Android APK is generated at `android/app/build/outputs/apk/debug/app-debug.apk` and uses the package id `com.fiskindal.fiotp`. Android supports API 23 and newer. Its first build is debug-signed. The Android UI, OTP engine, vault cryptography, file selection, and QR camera flow are implemented in Kotlin; the Apple and web targets continue to use the existing TypeScript/GeaStack application.
 
-The web target is intended for interface development and preview. It does not open or persist production vaults. Camera access and production vault workflows are available in the macOS application.
+The Windows target uses GeaStack's native Win32 desktop renderer. Build it on Windows with `npm run build:windows`; run it with `npm run run:windows`. The executable is generated at `dist/windows/fiotp-gea/FiOTP.exe`. The Windows host stores its default encrypted vault under `%APPDATA%\FiOTP\kasa.json`, uses native Windows file dialogs and the system clipboard, and reads and writes the same encrypted vault format as the Apple and Linux targets. Camera QR scanning is not available in the initial Windows target; add accounts with an `otpauth://` URI or enter them manually.
+
+The web target is intended for interface development and preview. It does not open or persist production vaults. Camera access and production vault workflows are available in the macOS and iOS applications.
 
 `npm run build:macos` adds the camera usage description to the application bundle and applies an ad-hoc signature for local testing. Public distribution requires signing with a Developer ID certificate and notarization by Apple.
 
@@ -53,7 +58,7 @@ The web target is intended for interface development and preview. It does not op
 4. Select a TOTP code to copy it. For HOTP accounts, use the counter control to advance to the next code.
 5. Find accounts with search, categories, and favorites. Use **Vault & Backup** to export an encrypted backup, import a backup, or change the master password.
 
-By default, the vault is stored at `~/Library/Application Support/FiOTP Gea/kasa.json`; another location can be selected in the application. The vault key is derived with PBKDF2-HMAC-SHA256. Writes are atomic, and the previous valid version is retained as a `.bak` recovery file. The vault cannot be opened without its master password, so keep the password and backups in a secure location. FiOTP locks the vault after five minutes of inactivity.
+On macOS the default vault is `~/Library/Application Support/FiOTP Gea/kasa.json`; on Windows it is `%APPDATA%\FiOTP\kasa.json`. Linux uses `$XDG_DATA_HOME/fiotp/kasa.json` (or `~/.local/share/fiotp/kasa.json`). Another location can be selected in the application. The vault key is derived with PBKDF2-HMAC-SHA256. Writes are atomic, and the previous valid version is retained as a `.bak` recovery file. The vault cannot be opened without its master password, so keep the password and backups in a secure location. FiOTP locks the vault after five minutes of inactivity.
 
 ## Project structure
 
@@ -61,7 +66,8 @@ By default, the vault is stored at `~/Library/Application Support/FiOTP Gea/kasa
 | --- | --- |
 | `src/App.tsx`, `src/stores/` | Interface and application state |
 | `src/crypto/`, `src/services/` | OTP generation and encrypted vault operations |
-| `native/`, `scripts/fiotp-host-plugin.mjs` | Apple host integration |
+| `native/`, `scripts/fiotp-host-plugin.mjs` | Apple, Linux, and Windows host integrations |
+| `windows.json` | Windows native window configuration |
 | `android/app/src/main/java/` | Native Android Compose UI, OTP, vault encryption, SAF and camera integration |
 | `patches/` | GeaStack macOS secure password field patch |
 | `tests/`, `native/fiotp_host_test.mm` | OTP and native vault tests |

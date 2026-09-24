@@ -528,7 +528,7 @@ export class App extends ReactiveComponent {
 
     return (
       <div
-        class={`app-switch-root ${platformHost.platform === 'ios' ? 'ios-layout' : platformHost.platform === 'linux' ? 'linux-layout' : 'macos-layout'}`}
+        class={`app-switch-root ${platformHost.platform === 'ios' ? 'ios-layout' : platformHost.platform === 'linux' ? 'linux-layout' : platformHost.platform === 'windows' ? 'windows-layout' : 'macos-layout'}`}
         data-account-count={vaultStore.totalCount}
       >
         <div class="app-stage" style={{ display: vaultStore.phase === 'unlocked' ? 'none' : 'flex' }}>
@@ -834,10 +834,10 @@ export class App extends ReactiveComponent {
                   <div style={{ fontSize: '11px', color: '#8c909f', marginTop: '4px' }}>
                     Google Authenticator QR aktarım bağlantıları (`otpauth-migration://`) da desteklenir.
                   </div>
-                  <div style={{ fontSize: '11px', color: '#8c909f', marginTop: '8px', display: platformHost.platform === 'linux' ? 'block' : 'none' }}>
-                    Linux sürümünde kamera ile QR tarama yok. URI’yi buraya yapıştırabilir veya Manuel sekmesinden ekleyebilirsiniz.
+                  <div style={{ fontSize: '11px', color: '#8c909f', marginTop: '8px', display: platformHost.platform === 'linux' || platformHost.platform === 'windows' ? 'block' : 'none' }}>
+                    Bu sürümde kamera ile QR tarama yok. URI’yi buraya yapıştırabilir veya Manuel sekmesinden ekleyebilirsiniz.
                   </div>
-                  <button class="btn-ghost" style={{ marginTop: '8px', display: platformHost.platform === 'linux' ? 'none' : 'flex' }} onClick={() => this.scanQr()}>
+                  <button class="btn-ghost" style={{ marginTop: '8px', display: platformHost.platform === 'linux' || platformHost.platform === 'windows' ? 'none' : 'flex' }} onClick={() => this.scanQr()}>
                     Kameradan QR Tara…
                   </button>
               </div>

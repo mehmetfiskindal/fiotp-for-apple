@@ -14,7 +14,9 @@
     "build:ios:device": "node_modules/@geastack/apple/targets/ios/build-ios.sh fiotp-gea device && node scripts/ios-postbuild.mjs",
     "build:android": "cd android && ./gradlew assembleDebug",
     "test:android": "cd android && ./gradlew testDebugUnitTest",
-    "build:linux": "bash scripts/build-linux.sh"
+    "build:linux": "bash scripts/build-linux.sh",
+    "build:windows": "gea build --target windows",
+    "run:windows": "gea run --target windows"
   },
   "dependencies": {
     "@geajs/core": "latest",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@geastack/linux": "^0.1.0",
+    "@geastack/windows": "^0.1.0",
     "typescript": "latest",
     "vite": "latest"
   },
@@ -43,10 +46,11 @@
       "ios": true,
       "raspberry-pi-os": true,
       "android": false,
-      "windows": false
+      "windows": true
     },
     "nativeSources": [
-      "native/fiotp_host.mm"
+      "native/fiotp_host.mm",
+      "native/fiotp_host_windows.cpp"
     ],
     "compilerPlugins": [
       "scripts/fiotp-host-plugin.mjs"

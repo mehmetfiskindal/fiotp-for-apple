@@ -1,4 +1,4 @@
-export type Platform = 'macos' | 'ios' | 'linux' | 'web'
+export type Platform = 'macos' | 'ios' | 'linux' | 'windows' | 'web'
 
 declare function fiotpHostInvoke(method: string, payload: string): string
 
